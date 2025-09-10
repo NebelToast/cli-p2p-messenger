@@ -1,0 +1,6 @@
+Nachricht: dwdwd von 192.168.1.102:34255 bestehend aus 5 bytes
+Nachricht: f von 192.168.1.102:34255 bestehend aus 1 bytes
+Nachricht: 1 von 192.168.1.102:34255 bestehend aus 1 bytes
+Nachricht: 2 von 192.168.1.102:34255 bestehend aus 1 bytes
+Nachricht: 3 von 192.168.1.102:34255 bestehend aus 1 bytes
+Nachricht: 4 von 192.168.1.102:34255 bestehend aus 1 bytes
