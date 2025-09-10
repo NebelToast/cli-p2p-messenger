@@ -1,10 +1,11 @@
 use local_ip_address::local_ip;
-use std::fs::File;
-use std::io::{Write, stdin};
-use std::net::{SocketAddr, UdpSocket};
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::{env, io};
+use std::{
+    fs::File,
+    io::{stdin, Write},
+    net::{SocketAddr, UdpSocket},
+    sync::{Arc, Mutex},
+    thread, {env, io},
+};
 
 struct Packet {
     sender: SocketAddr,
@@ -20,7 +21,7 @@ impl Packet {
             payload: payload,
         }
     }
-    fn printmessage(&self) {
+    fn print_message(&self) {
         println!(
             "Naricht: {} von {} bestehend aus {} bytes",
             str::from_utf8(&self.payload).unwrap(),
@@ -28,7 +29,7 @@ impl Packet {
             &self.bytes
         );
     }
-    fn savemessage(&self) -> Result<(), io::Error> {
+    fn save_message(&self) -> Result<(), io::Error> {
         let mut file = File::options().create(true).append(true).open("lol.txt")?;
         writeln!(
             &mut file,
@@ -44,13 +45,13 @@ impl Packet {
 
 fn sever(socket: UdpSocket) {
     loop {
-        let mut buf = [0; 256];
+        let mut buffer = [0; 256];
         let (bytes, src) = socket
-            .recv_from(&mut buf)
+            .recv_from(&mut buffer)
             .expect("Fehler beim Narichten empfangen");
 
-        Packet::new(src, bytes, Box::new(buf))
-            .savemessage()
+        Packet::new(src, bytes, Box::new(buffer))
+            .save_message()
             .expect("Fehler beim schreiben in datei");
     }
 }
@@ -64,15 +65,18 @@ fn client(socket: UdpSocket) {
         let writer = Arc::clone(&packages);
 
         thread::spawn(move || {
-            let mut buf = [0; 256];
+            let mut buffer = [0; 256];
             loop {
-                let (bytes, src) = socket_clone.recv_from(&mut buf).expect("Fehler in thread");
-                let packet = Packet::new(src, bytes, Box::new(buf));
-                packet.printmessage();
+                let (bytes, src) = socket_clone
+                    .recv_from(&mut buffer)
+                    .expect("Fehler in thread");
+                let packet = Packet::new(src, bytes, Box::new(buffer));
+                packet.print_message();
                 let mut vec = writer.lock().unwrap();
                 vec.push(packet);
             }
         });
+
         loop {
             stdin().read_line(&mut input).expect("Failed to read line");
 
@@ -89,7 +93,7 @@ fn client(socket: UdpSocket) {
                 "narichten" => {
                     let reader_data = Arc::clone(&packages);
                     for messages in reader_data.lock().unwrap().iter() {
-                        messages.printmessage()
+                        messages.print_message()
                     }
                 }
 
