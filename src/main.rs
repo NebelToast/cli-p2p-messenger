@@ -1,5 +1,4 @@
 use local_ip_address::local_ip;
-use snow::{Builder, Keypair, params::NoiseParams};
 use std::{
     collections::HashMap,
     env,
@@ -61,15 +60,15 @@ fn sever(socket: UdpSocket) {
 
 fn client(socket: UdpSocket) {
     {
-        let mut addres_book: HashMap<SocketAddr, String> = HashMap::new();
-        static PATTERN: &'static str = "Noise_XX_25519_AESGCM_SHA256";
+        // let addres_book: HashMap<SocketAddr, String> = HashMap::new();
+        // static PATTERN: &'static str = "Noise_XX_25519_AESGCM_SHA256";
 
-        let mut initiator = snow::Builder::new(PATTERN.parse().unwrap())
-            .build_initiator()
-            .unwrap();
-        let mut responder = snow::Builder::new(PATTERN.parse().unwrap())
-            .build_responder()
-            .unwrap();
+        // let initiator = snow::Builder::new(PATTERN.parse().unwrap())
+        //     .build_initiator()
+        //     .unwrap();
+        // let responder = snow::Builder::new(PATTERN.parse().unwrap())
+        //     .build_responder()
+        //     .unwrap();
 
         let mut input = String::new();
         let mut destination: SocketAddr = "127.0.0.1:500".parse().expect("ungültige IP");
