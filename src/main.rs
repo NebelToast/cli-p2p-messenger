@@ -66,7 +66,7 @@ fn client(socket: UdpSocket) {
         let public_key = if let Ok(key) = fs::read("public.txt") {
             key
         } else {
-            let key = snow::Builder::new("Noise_XX_25519_ChaChaPoly_BLAKE2s".parse().unwrap())
+            let key = snow::Builder::new("Noise_XX_25519_ChaChaPoly_SHA256".parse().unwrap())
                 .generate_keypair()
                 .unwrap()
                 .public;
@@ -77,13 +77,14 @@ fn client(socket: UdpSocket) {
         let private_key = if let Ok(key) = fs::read("private.txt") {
             key
         } else {
-            let key = snow::Builder::new("Noise_XX_25519_ChaChaPoly_BLAKE2s".parse().unwrap())
+            let key = snow::Builder::new("Noise_XX_25519_ChaChaPoly_SHA256".parse().unwrap())
                 .generate_keypair()
                 .unwrap()
                 .private;
             fs::write("private.txt", &key).unwrap();
             key
         };
+        
 
         // static PATTERN: &'static str = "Noise_XX_25519_AESGCM_SHA256";
 
