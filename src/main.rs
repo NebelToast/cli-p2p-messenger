@@ -1,7 +1,8 @@
 use local_ip_address::local_ip;
+use snow;
 use std::{
     collections::HashMap,
-    env,
+    env, fs,
     fs::File,
     io::{self, Write, stdin},
     net::{SocketAddr, UdpSocket},
@@ -60,7 +61,30 @@ fn sever(socket: UdpSocket) {
 
 fn client(socket: UdpSocket) {
     {
-        // let addres_book: HashMap<SocketAddr, String> = HashMap::new();
+        //let address_book: HashMap<SocketAddr, String> = HashMap::new();
+
+        let public_key = if let Ok(key) = fs::read("public.txt") {
+            key
+        } else {
+            let key = snow::Builder::new("Noise_XX_25519_ChaChaPoly_BLAKE2s".parse().unwrap())
+                .generate_keypair()
+                .unwrap()
+                .public;
+            fs::write("public.txt", &key).unwrap();
+            key
+        };
+
+        let private_key = if let Ok(key) = fs::read("private.txt") {
+            key
+        } else {
+            let key = snow::Builder::new("Noise_XX_25519_ChaChaPoly_BLAKE2s".parse().unwrap())
+                .generate_keypair()
+                .unwrap()
+                .private;
+            fs::write("private.txt", &key).unwrap();
+            key
+        };
+
         // static PATTERN: &'static str = "Noise_XX_25519_AESGCM_SHA256";
 
         // let initiator = snow::Builder::new(PATTERN.parse().unwrap())
@@ -102,11 +126,15 @@ fn client(socket: UdpSocket) {
                         .expect("Ungültige IP-Addresse");
                     input.clear();
                 }
-                "narichten" => {
+                "nachrichten" => {
                     let reader_data = Arc::clone(&packages);
                     for messages in reader_data.lock().unwrap().iter() {
                         messages.print_message()
                     }
+                }
+                "ip" => {
+                    println!("Deine IP addresse ist: {}", socket.local_addr().unwrap());
+                    input.clear();
                 }
 
                 _ => match socket.send_to(input.trim().as_bytes(), &destination) {
@@ -123,7 +151,7 @@ fn client(socket: UdpSocket) {
 fn main() {
     let args: Vec<String> = env::args().collect();
     args.get(1)
-        .ok_or("Bitte argumente eingeben. Syntax server/client port")
+        .ok_or("Bitte argumente eingeben. Syntax: <server/client port> PORT")
         .expect("Fehler");
     let socket = UdpSocket::bind(SocketAddr::new(
         local_ip().unwrap(),
