@@ -58,57 +58,65 @@ fn sever(socket: UdpSocket) {
             .expect("Fehler beim schreiben in datei");
     }
 }
-fn establish_connection(pk: &Vec<u8>, dest: SocketAddr, sock: UdpSocket) -> TransportState {
+fn establish_connection(
+    pk: &Vec<u8>,
+    dest: Option<SocketAddr>,
+    sock: UdpSocket,
+    initiator: bool,
+) -> TransportState {
     let pattern = "Noise_XX_25519_ChaChaPoly_SHA256";
-    let mut noise = Builder::new(pattern.parse().unwrap())
-        .local_private_key(&pk)
-        .unwrap()
-        .build_initiator()
-        .unwrap();
-    let mut buf = vec![0_u8; 65535];
-    let mut res_buffer = vec![0_u8; 65535];
-    // ->e
-    let len = noise.write_message(&[], &mut buf).unwrap();
-    sock.send_to(&buf[..len], &dest).unwrap();
 
-    let (n_bytes, _src) = sock.recv_from(&mut res_buffer).unwrap();
-    // <- e, ee, s, es
-    noise
-        .read_message(&res_buffer[..n_bytes], &mut buf)
-        .unwrap();
+    let mut message_buffer = vec![0_u8; 65535];
+    let mut recv_buffer = vec![0_u8; 65535];
 
-    // -> s, se
-    let len = noise.write_message(&[], &mut buf).unwrap();
-    sock.send_to(&buf[..len], &dest).unwrap();
-    let transport = noise.into_transport_mode().unwrap();
-    transport
-}
+    let transport = if initiator {
+        let dest = dest.expect("Intitator needs Ip of reciever");
+        let mut noise = Builder::new(pattern.parse().unwrap())
+            .local_private_key(&pk)
+            .unwrap()
+            .build_initiator()
+            .unwrap();
+        // ->e
+        let len = noise.write_message(&[], &mut message_buffer).unwrap();
+        sock.send_to(&message_buffer[..len], &dest).unwrap();
 
-fn establish_connection_recv(pk: &Vec<u8>, sock: UdpSocket) -> TransportState {
-    let pattern = "Noise_XX_25519_ChaChaPoly_SHA256";
-    let mut noise = Builder::new(pattern.parse().unwrap())
-        .local_private_key(&pk)
-        .unwrap()
-        .build_responder()
-        .unwrap();
-    let mut buf = vec![0_u8; 65535];
-    let mut res_buffer = vec![0_u8; 65535];
-    let (n_bytes, src) = sock.recv_from(&mut res_buffer).unwrap();
+        let (n_bytes, _src) = sock.recv_from(&mut recv_buffer).unwrap();
 
-    noise
-        .read_message(&res_buffer[..n_bytes], &mut buf)
-        .unwrap();
+        // <- e, ee, s, es
+        noise
+            .read_message(&recv_buffer[..n_bytes], &mut message_buffer)
+            .unwrap();
 
-    // -> e, ee, s, es
-    let len = noise.write_message(&[], &mut buf).unwrap();
-    sock.send_to(&buf[..len], &src).unwrap();
-    let (n_bytes, _src) = sock.recv_from(&mut res_buffer).unwrap();
+        // -> s, se
+        let len = noise.write_message(&[], &mut message_buffer).unwrap();
+        sock.send_to(&message_buffer[..len], &dest).unwrap();
+        noise.into_transport_mode().unwrap()
+    } else {
+        let mut noise = Builder::new(pattern.parse().unwrap())
+            .local_private_key(&pk)
+            .unwrap()
+            .build_responder()
+            .unwrap();
 
-    // <- s, se
-    noise
-        .read_message(&res_buffer[..n_bytes], &mut buf)
-        .unwrap();
-    let transport = noise.into_transport_mode().unwrap();
+        let mut message_buffer = vec![0_u8; 65535];
+        let mut recv_buffer = vec![0_u8; 65535];
+        let (n_bytes, src) = sock.recv_from(&mut recv_buffer).unwrap();
+
+        noise
+            .read_message(&recv_buffer[..n_bytes], &mut message_buffer)
+            .unwrap();
+
+        // -> e, ee, s, es
+        let len = noise.write_message(&[], &mut message_buffer).unwrap();
+        sock.send_to(&message_buffer[..len], &src).unwrap();
+        let (n_bytes, _src) = sock.recv_from(&mut recv_buffer).unwrap();
+
+        // <- s, se
+        noise
+            .read_message(&recv_buffer[..n_bytes], &mut message_buffer)
+            .unwrap();
+        noise.into_transport_mode().unwrap()
+    };
     transport
 }
 
@@ -164,10 +172,6 @@ fn client(socket: UdpSocket) {
             match input.trim().as_ref() {
                 "connect" => {
                     input.clear();
-                    println!("IP(mit port)?: ");
-                    stdin().read_line(&mut input).expect("Failed to read line");
-                    destination = input.trim().parse().unwrap();
-                    input.clear();
 
                     println!("Initiator or Responder?");
                     println!("[1] Initiator");
@@ -178,10 +182,17 @@ fn client(socket: UdpSocket) {
 
                     match response.as_str().trim() {
                         "1" => {
+                            input.clear();
+                            println!("IP(mit port)?: ");
+                            stdin().read_line(&mut input).expect("Failed to read line");
+                            destination = input.trim().parse().unwrap();
+                            input.clear();
+
                             let mut transport = establish_connection(
                                 &private_key,
-                                destination,
+                                Some(destination),
                                 socket.try_clone().expect("socket error"),
+                                true,
                             );
                             let mut buf = vec![0_u8; 65535];
                             let len = transport
@@ -191,9 +202,11 @@ fn client(socket: UdpSocket) {
                             socket.send_to(&buf[..len], &destination).unwrap();
                         }
                         "2" => {
-                            let mut transport = establish_connection_recv(
+                            let mut transport = establish_connection(
                                 &private_key,
+                                None,
                                 socket.try_clone().expect("socket fehler"),
+                                false,
                             );
 
                             let mut recv_buf = vec![0_u8; 65535];
