@@ -128,12 +128,12 @@ fn establish_connection(
     };
     transport
 }
-fn connect(socket: &UdpSocket, mut input: &mut String) {
+fn connect(socket: &UdpSocket, mut input: &mut String) -> Option<TransportState> {
     let keypair = match generate_or_load_keypair() {
         Ok(kp) => kp,
         Err(e) => {
             eprintln!("Fehler beim Laden/Erstellen der Schlüssel: {}", e);
-            return;
+            return None;
         }
     };
     let private_key = keypair.private;
@@ -145,7 +145,7 @@ fn connect(socket: &UdpSocket, mut input: &mut String) {
 
     let response: String = input.parse().unwrap();
 
-    match response.as_str().trim() {
+    let transport = match response.as_str().trim() {
         "1" => {
             input.clear();
             println!("IP(mit port)?: ");
@@ -159,6 +159,7 @@ fn connect(socket: &UdpSocket, mut input: &mut String) {
                 .write_message(b"You cant read me OwO", &mut buf)
                 .unwrap();
             socket.send_to(&buf[..len], &destination).unwrap();
+            return Some(transport);
         }
         "2" => {
             let mut transport = establish_connection(&private_key, None, socket, false);
@@ -177,11 +178,13 @@ fn connect(socket: &UdpSocket, mut input: &mut String) {
                 src,
                 String::from_utf8_lossy(&dec_buf[..len])
             );
+            return Some(transport);
         }
-        _ => (),
+        _ => None,
     };
     println!("funktion fertig");
     input.clear();
+    transport
 }
 
 fn client(socket: UdpSocket) {
@@ -197,7 +200,6 @@ fn client(socket: UdpSocket) {
         thread::spawn(move || {
             let mut buffer = [0; 65535];
             loop {
-                sleep(time::Duration::from_hours(1));
                 let (bytes, src) = socket_clone
                     .recv_from(&mut buffer)
                     .expect("Fehler in thread");
