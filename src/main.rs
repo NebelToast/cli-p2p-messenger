@@ -32,7 +32,7 @@ impl Packet {
             &self.bytes
         );
     }
-    fn save_message(&self) -> Result<(), io::Error> {
+    fn _save_message(&self) -> Result<(), io::Error> {
         let mut file = File::options().create(true).append(true).open("lol.txt")?;
         writeln!(
             &mut file,
@@ -46,18 +46,6 @@ impl Packet {
     }
 }
 
-fn sever(socket: UdpSocket) {
-    loop {
-        let mut buffer = [0; 256];
-        let (bytes, src) = socket
-            .recv_from(&mut buffer)
-            .expect("Fehler beim Narichten empfangen");
-
-        Packet::new(src, bytes, Box::new(buffer))
-            .save_message()
-            .expect("Fehler beim schreiben in datei");
-    }
-}
 fn establish_connection(
     pk: &Vec<u8>,
     dest: Option<SocketAddr>,
@@ -253,18 +241,12 @@ fn client(socket: UdpSocket) {
 }
 fn main() {
     let args: Vec<String> = env::args().collect();
-    args.get(1)
-        .ok_or("Bitte argumente eingeben. Syntax: <server/client port> PORT")
-        .expect("Fehler");
+    args.get(0).ok_or("Bitte Port eingeben").expect("Fehler");
     let socket = UdpSocket::bind(SocketAddr::new(
         local_ip().unwrap(),
-        args[2].parse::<u16>().unwrap(),
+        args[1].parse::<u16>().unwrap(),
     ))
     .unwrap();
 
-    if &args[1] == "server" {
-        sever(socket);
-    } else if &args[1] == "client" {
-        client(socket);
-    }
+    client(socket);
 }
