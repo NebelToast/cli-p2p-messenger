@@ -1,13 +1,13 @@
+use core::time;
 use local_ip_address::local_ip;
-use snow;
+use snow::{Builder, TransportState};
 use std::{
-    collections::HashMap,
-    env, fs,
-    fs::File,
+    env,
+    fs::{self, File},
     io::{self, Write, stdin},
     net::{SocketAddr, UdpSocket},
     sync::{Arc, Mutex},
-    thread,
+    thread::{self, sleep},
 };
 
 struct Packet {
@@ -58,12 +58,65 @@ fn sever(socket: UdpSocket) {
             .expect("Fehler beim schreiben in datei");
     }
 }
+fn establish_connection(pk: &Vec<u8>, dest: SocketAddr, sock: UdpSocket) -> TransportState {
+    let pattern = "Noise_XX_25519_ChaChaPoly_SHA256";
+    let mut noise = Builder::new(pattern.parse().unwrap())
+        .local_private_key(&pk)
+        .unwrap()
+        .build_initiator()
+        .unwrap();
+    let mut buf = vec![0_u8; 65535];
+    let mut res_buffer = vec![0_u8; 65535];
+    // ->e
+    let len = noise.write_message(&[], &mut buf).unwrap();
+    sock.send_to(&buf[..len], &dest).unwrap();
+
+    let (n_bytes, _src) = sock.recv_from(&mut res_buffer).unwrap();
+    // <- e, ee, s, es
+    noise
+        .read_message(&res_buffer[..n_bytes], &mut buf)
+        .unwrap();
+
+    // -> s, se
+    let len = noise.write_message(&[], &mut buf).unwrap();
+    sock.send_to(&buf[..len], &dest).unwrap();
+    let transport = noise.into_transport_mode().unwrap();
+    transport
+}
+
+fn establish_connection_recv(pk: &Vec<u8>, sock: UdpSocket) -> TransportState {
+    let pattern = "Noise_XX_25519_ChaChaPoly_SHA256";
+    let mut noise = Builder::new(pattern.parse().unwrap())
+        .local_private_key(&pk)
+        .unwrap()
+        .build_responder()
+        .unwrap();
+    let mut buf = vec![0_u8; 65535];
+    let mut res_buffer = vec![0_u8; 65535];
+    let (n_bytes, src) = sock.recv_from(&mut res_buffer).unwrap();
+
+    noise
+        .read_message(&res_buffer[..n_bytes], &mut buf)
+        .unwrap();
+
+    // -> e, ee, s, es
+    let len = noise.write_message(&[], &mut buf).unwrap();
+    sock.send_to(&buf[..len], &src).unwrap();
+    let (n_bytes, _src) = sock.recv_from(&mut res_buffer).unwrap();
+
+    // <- s, se
+    noise
+        .read_message(&res_buffer[..n_bytes], &mut buf)
+        .unwrap();
+    let transport = noise.into_transport_mode().unwrap();
+    transport
+}
 
 fn client(socket: UdpSocket) {
     {
         //let address_book: HashMap<SocketAddr, String> = HashMap::new();
 
-        let public_key = if let Ok(key) = fs::read("public.txt") {
+        let _public_key = if let Ok(key) = fs::read("public.txt") {
             key
         } else {
             let key = snow::Builder::new("Noise_XX_25519_ChaChaPoly_SHA256".parse().unwrap())
@@ -84,16 +137,6 @@ fn client(socket: UdpSocket) {
             fs::write("private.txt", &key).unwrap();
             key
         };
-        
-
-        // static PATTERN: &'static str = "Noise_XX_25519_AESGCM_SHA256";
-
-        // let initiator = snow::Builder::new(PATTERN.parse().unwrap())
-        //     .build_initiator()
-        //     .unwrap();
-        // let responder = snow::Builder::new(PATTERN.parse().unwrap())
-        //     .build_responder()
-        //     .unwrap();
 
         let mut input = String::new();
         let mut destination: SocketAddr = "127.0.0.1:500".parse().expect("ungültige IP");
@@ -102,8 +145,9 @@ fn client(socket: UdpSocket) {
         let writer = Arc::clone(&packages);
 
         thread::spawn(move || {
-            let mut buffer = [0; 256];
+            let mut buffer = [0; 65535];
             loop {
+                sleep(time::Duration::from_hours(1));
                 let (bytes, src) = socket_clone
                     .recv_from(&mut buffer)
                     .expect("Fehler in thread");
@@ -119,12 +163,57 @@ fn client(socket: UdpSocket) {
 
             match input.trim().as_ref() {
                 "connect" => {
+                    input.clear();
+                    println!("IP(mit port)?: ");
                     stdin().read_line(&mut input).expect("Failed to read line");
-                    destination = input
-                        .split_off(8)
-                        .trim()
-                        .parse()
-                        .expect("Ungültige IP-Addresse");
+                    destination = input.trim().parse().unwrap();
+                    input.clear();
+
+                    println!("Initiator or Responder?");
+                    println!("[1] Initiator");
+                    println!("[2] Responder");
+                    stdin().read_line(&mut input).expect("Failed to read line");
+
+                    let response: String = input.parse().unwrap();
+
+                    match response.as_str().trim() {
+                        "1" => {
+                            let mut transport = establish_connection(
+                                &private_key,
+                                destination,
+                                socket.try_clone().expect("socket error"),
+                            );
+                            let mut buf = vec![0_u8; 65535];
+                            let len = transport
+                                .write_message(b"You cant read me OwO", &mut buf)
+                                .unwrap();
+                            //sleep(time::Duration::from_millis(2000));
+                            socket.send_to(&buf[..len], &destination).unwrap();
+                        }
+                        "2" => {
+                            let mut transport = establish_connection_recv(
+                                &private_key,
+                                socket.try_clone().expect("socket fehler"),
+                            );
+
+                            let mut recv_buf = vec![0_u8; 65535];
+                            let mut dec_buf = vec![0_u8; 65535];
+
+                            let (n_bytes, src) = socket.recv_from(&mut recv_buf).unwrap();
+
+                            let len = transport
+                                .read_message(&recv_buf[..n_bytes], &mut dec_buf)
+                                .unwrap();
+
+                            println!(
+                                "client @ {} said: {}",
+                                src,
+                                String::from_utf8_lossy(&dec_buf[..len])
+                            );
+                        }
+                        _ => (),
+                    };
+                    println!("funktion fertig");
                     input.clear();
                 }
                 "nachrichten" => {
