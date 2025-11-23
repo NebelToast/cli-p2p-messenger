@@ -144,6 +144,11 @@ fn connect_2(
     sock: &UdpSocket,
     map: Arc<Mutex<HashMap<SocketAddr, Session>>>,
 ) {
+    if let Some(Session::Established(_)) = map.lock().unwrap().get(&destination) {
+        println!("Connection established!");
+        return;
+    }
+
     let mut transport_state = Builder::new(PATTERN.parse().unwrap())
         .local_private_key(&key.lock().unwrap().private)
         .unwrap()
@@ -361,8 +366,8 @@ fn client(socket: UdpSocket) {
                     println!("IP(mit port)?: ");
                     stdin().read_line(&mut input).expect("Failed to read line");
                     destination = input.trim().parse().unwrap();
-                    input.clear();
                     connect_2(&destination, &key_pair, &socket, Arc::clone(&peer_map));
+
                     if let Some(Session::Established(transportstate)) =
                         Some(peer_map.lock().unwrap().get(&destination).unwrap())
                     {
