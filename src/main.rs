@@ -1,19 +1,28 @@
-use core::time;
 use local_ip_address::local_ip;
 use snow::{Builder, Keypair, TransportState};
 use std::{
+    collections::{
+        HashMap,
+        hash_map::{Entry, VacantEntry},
+    },
     env,
     fs::{self, File},
     io::{self, Write, stdin},
     net::{SocketAddr, UdpSocket},
     sync::{Arc, Mutex},
     thread::{self, sleep},
+    time::Duration,
 };
+const PATTERN: &str = "Noise_XX_25519_ChaChaPoly_SHA256";
 
 struct Packet {
     sender: SocketAddr,
     bytes: usize,
     payload: Box<[u8]>,
+}
+enum Session {
+    Handshaking(snow::HandshakeState),
+    Established(snow::TransportState),
 }
 
 impl Packet {
@@ -45,6 +54,7 @@ impl Packet {
         Ok(())
     }
 }
+
 fn generate_or_load_keypair() -> Result<Keypair, std::io::Error> {
     if let Ok(private_key) = fs::read("private.key") {
         if let Ok(public_key) = fs::read("public.key") {
@@ -85,13 +95,13 @@ fn establish_connection(
             .unwrap()
             .build_initiator()
             .unwrap();
+
         // ->e
         let len = noise.write_message(&[], &mut message_buffer).unwrap();
         sock.send_to(&message_buffer[..len], &dest).unwrap();
 
-        let (n_bytes, _src) = sock.recv_from(&mut recv_buffer).unwrap();
-
         // <- e, ee, s, es
+        let (n_bytes, _src) = sock.recv_from(&mut recv_buffer).unwrap();
         noise
             .read_message(&recv_buffer[..n_bytes], &mut message_buffer)
             .unwrap();
@@ -128,6 +138,48 @@ fn establish_connection(
     };
     transport
 }
+fn connect_2(
+    &destination: &SocketAddr,
+    key: &Arc<Mutex<Keypair>>,
+    sock: &UdpSocket,
+    map: Arc<Mutex<HashMap<SocketAddr, Session>>>,
+) {
+    let mut transport_state = Builder::new(PATTERN.parse().unwrap())
+        .local_private_key(&key.lock().unwrap().private)
+        .unwrap()
+        .build_initiator()
+        .unwrap();
+    let mut message_buffer = vec![0_u8; 65535];
+
+    let len = transport_state
+        .write_message(&[], &mut message_buffer)
+        .unwrap();
+    sock.send_to(&message_buffer[..len], &destination).unwrap();
+
+    map.lock()
+        .unwrap()
+        .insert(destination, Session::Handshaking(transport_state));
+
+    for n in 1..6 {
+        println!("Connection is being established {} try", n);
+        if map.lock().unwrap().contains_key(&destination) {
+            println!("connection established!");
+            return;
+        }
+        // Wait a bit before checking again
+        thread::sleep(Duration::from_millis(2000));
+    }
+    println!("Connection timed out.");
+}
+// match peers.entry(destination) {
+//     Entry::Occupied(mut occupied_entry) => {
+//         if let Session::Established(state) = occupied_entry.get() {
+//             state
+//         }
+//     }
+//     Entry::Vacant(vacant_entry) => todo!(),
+// }
+
 fn connect(socket: &UdpSocket, mut input: &mut String) -> Option<TransportState> {
     let keypair = match generate_or_load_keypair() {
         Ok(kp) => kp,
@@ -192,21 +244,112 @@ fn client(socket: UdpSocket) {
         //let address_book: HashMap<SocketAddr, String> = HashMap::new();
 
         let mut input = String::new();
-        let destination: SocketAddr = "127.0.0.1:500".parse().expect("ungültige IP");
+        let mut destination: SocketAddr = "127.0.0.1:500".parse().expect("ungültige IP");
         let socket_clone = socket.try_clone().expect("couldn't clone the socket");
-        let packages = Arc::new(Mutex::new(vec![]));
-        let writer = Arc::clone(&packages);
-
+        let packages: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(vec![]));
+        let _writer = Arc::clone(&packages);
+        let key_pair = Arc::new(Mutex::new(generate_or_load_keypair().unwrap()));
+        let key_pair_clone = Arc::clone(&key_pair);
+        let peer_map = Arc::new(Mutex::new(HashMap::<SocketAddr, Session>::new()));
+        let peer_map_clone = Arc::clone(&peer_map);
         thread::spawn(move || {
-            let mut buffer = [0; 65535];
+            let mut recv_buffer = [0_u8; 65535];
+            let mut message_buffer = vec![0_u8; 65535];
+
             loop {
                 let (bytes, src) = socket_clone
-                    .recv_from(&mut buffer)
+                    .recv_from(&mut recv_buffer)
                     .expect("Fehler in thread");
-                let packet = Packet::new(src, bytes, Box::new(buffer));
-                packet.print_message();
-                let mut vec = writer.lock().unwrap();
-                vec.push(packet);
+                let mut peers = peer_map_clone.lock().unwrap();
+                let mut session_to_upgrade = None;
+
+                match peers.entry(src) {
+                    Entry::Occupied(mut occupied_entry) => {
+                        let mut finished = false;
+                        match occupied_entry.get_mut() {
+                            Session::Established(transport) => {
+                                match transport
+                                    .read_message(&recv_buffer[..bytes], &mut message_buffer)
+                                {
+                                    Ok(len) => {
+                                        println!(
+                                            "Message from {}: {}",
+                                            src,
+                                            String::from_utf8_lossy(&message_buffer[..len])
+                                        );
+                                    }
+                                    Err(e) => {
+                                        println!("Failed to decrypt message from {}: {}", src, e);
+                                    }
+                                }
+                            }
+                            Session::Handshaking(handshake) => {
+                                match handshake
+                                    .read_message(&recv_buffer[..bytes], &mut message_buffer)
+                                {
+                                    Ok(_) => {
+                                        if !handshake.is_handshake_finished() {
+                                            match handshake.write_message(&[], &mut message_buffer)
+                                            {
+                                                Ok(len) => {
+                                                    socket_clone
+                                                        .send_to(&message_buffer[..len], &src)
+                                                        .unwrap();
+                                                }
+                                                Err(e) => println!(
+                                                    "Failed to write handshake message: {}",
+                                                    e
+                                                ),
+                                            }
+                                        }
+                                        if handshake.is_handshake_finished() {
+                                            finished = true;
+                                        }
+                                    }
+                                    Err(e) => println!(
+                                        "Failed to read handshake message from {}: {}",
+                                        src, e
+                                    ),
+                                }
+                            }
+                        }
+                        if finished {
+                            session_to_upgrade = Some(occupied_entry.remove());
+                        }
+                    }
+                    Entry::Vacant(vacant_entry) => {
+                        let mut transport_state = Builder::new(PATTERN.parse().unwrap())
+                            .local_private_key(&key_pair_clone.lock().unwrap().private)
+                            .unwrap()
+                            .build_responder()
+                            .unwrap();
+
+                        match transport_state
+                            .read_message(&recv_buffer[..bytes], &mut message_buffer)
+                        {
+                            Ok(_) => {
+                                match transport_state.write_message(&[], &mut message_buffer) {
+                                    Ok(len) => {
+                                        socket_clone.send_to(&message_buffer[..len], &src).unwrap();
+                                        vacant_entry.insert(Session::Handshaking(transport_state));
+                                    }
+                                    Err(e) => println!(
+                                        "Failed to write initial handshake response: {}",
+                                        e
+                                    ),
+                                }
+                            }
+                            Err(e) => println!(
+                                "Failed to read initial handshake message from {}: {}",
+                                src, e
+                            ),
+                        }
+                    }
+                }
+                if let Some(Session::Handshaking(handshake)) = session_to_upgrade {
+                    let transport = handshake.into_transport_mode().unwrap();
+                    peers.insert(src, Session::Established(transport));
+                }
             }
         });
 
@@ -216,7 +359,18 @@ fn client(socket: UdpSocket) {
             match input.trim().as_ref() {
                 "connect" => {
                     input.clear();
-                    connect(&socket, &mut input);
+                    println!("IP(mit port)?: ");
+                    stdin().read_line(&mut input).expect("Failed to read line");
+                    destination = input.trim().parse().unwrap();
+                    input.clear();
+                    connect_2(&destination, &key_pair, &socket, Arc::clone(&peer_map));
+                    if let Some(Session::Established(transportstate)) =
+                        Some(peer_map.lock().unwrap().get(&destination).unwrap())
+                    {
+                        Some(transportstate)
+                    } else {
+                        None
+                    };
                 }
                 "nachrichten" => {
                     let reader_data = Arc::clone(&packages);
@@ -229,13 +383,28 @@ fn client(socket: UdpSocket) {
                     input.clear();
                 }
 
-                _ => match socket.send_to(input.trim().as_bytes(), &destination) {
-                    Ok(hallo) => {
-                        println!("Es wurden {} bytes gesendet", hallo);
+                _ => {
+                    let mut peers = peer_map.lock().unwrap();
+                    if let Some(Session::Established(transport)) = peers.get_mut(&destination) {
+                        let mut buf = vec![0_u8; 65535];
+                        let len = transport
+                            .write_message(input.trim().as_bytes(), &mut buf)
+                            .unwrap();
+                        match socket.send_to(&buf[..len], &destination) {
+                            Ok(hallo) => {
+                                println!("Es wurden {} bytes gesendet", hallo);
+                                input.clear();
+                            }
+                            Err(erro) => println!("{}", erro),
+                        }
+                    } else {
+                        println!(
+                            "Keine Verbindung zu {}. Bitte erst 'connect' ausführen.",
+                            destination
+                        );
                         input.clear();
                     }
-                    Err(erro) => println!("{}", erro),
-                },
+                }
             };
         }
     }
