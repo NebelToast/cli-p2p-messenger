@@ -33,7 +33,7 @@ impl Packet {
     fn print_message(&self) {
         println!(
             "Naricht: {} von {} bestehend aus {} bytes",
-            str::from_utf8(&self.payload).unwrap(),
+            str::from_utf8(&self.payload[..self.bytes]).unwrap(),
             &self.sender,
             &self.bytes
         );
@@ -118,14 +118,14 @@ fn client(socket: UdpSocket) {
         let mut destination: SocketAddr = "127.0.0.1:500".parse().expect("ungültige IP");
         let socket_clone = socket.try_clone().expect("couldn't clone the socket");
         let packages: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(vec![]));
-        let _writer = Arc::clone(&packages);
+        let writer = Arc::clone(&packages);
         let key_pair = Arc::new(Mutex::new(generate_or_load_keypair().unwrap()));
         let key_pair_clone = Arc::clone(&key_pair);
         let peer_map = Arc::new(Mutex::new(HashMap::<SocketAddr, Session>::new()));
         let peer_map_clone = Arc::clone(&peer_map);
         thread::spawn(move || {
             let mut recv_buffer = [0_u8; 65535];
-            let mut message_buffer = vec![0_u8; 65535];
+            let mut message_buffer = [0_u8; 65535];
 
             loop {
                 let (bytes, src) = socket_clone
@@ -143,11 +143,17 @@ fn client(socket: UdpSocket) {
                                     .read_message(&recv_buffer[..bytes], &mut message_buffer)
                                 {
                                     Ok(len) => {
-                                        println!(
-                                            "Message from {}: {}",
-                                            src,
-                                            String::from_utf8_lossy(&message_buffer[..len])
-                                        );
+                                        let packet =
+                                            Packet::new(src, len, Box::new(message_buffer));
+                                        packet.print_message();
+                                        let mut vec = writer.lock().unwrap();
+                                        vec.push(packet);
+
+                                        // println!(
+                                        //     "Message from {}: {}",
+                                        //     src,
+                                        //     String::from_utf8_lossy(&message_buffer[..len])
+                                        // );
                                     }
                                     Err(e) => {
                                         println!("Failed to decrypt message from {}: {}", src, e);
@@ -277,6 +283,7 @@ fn client(socket: UdpSocket) {
                     }
                 }
             };
+            input.clear();
         }
     }
 }
