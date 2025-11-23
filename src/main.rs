@@ -161,13 +161,12 @@ fn connect_2(
         .insert(destination, Session::Handshaking(transport_state));
 
     for n in 1..6 {
+        thread::sleep(Duration::from_millis(750));
         println!("Connection is being established {} try", n);
-        if map.lock().unwrap().contains_key(&destination) {
-            println!("connection established!");
+        if let Some(Session::Established(_)) = map.lock().unwrap().get(&destination) {
+            println!("Connection established!");
             return;
         }
-        // Wait a bit before checking again
-        thread::sleep(Duration::from_millis(2000));
     }
     println!("Connection timed out.");
 }
