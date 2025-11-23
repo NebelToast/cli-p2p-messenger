@@ -1,16 +1,13 @@
 use local_ip_address::local_ip;
-use snow::{Builder, Keypair, TransportState};
+use snow::{Builder, Keypair};
 use std::{
-    collections::{
-        HashMap,
-        hash_map::{Entry, VacantEntry},
-    },
+    collections::{HashMap, hash_map::Entry},
     env,
     fs::{self, File},
     io::{self, Write, stdin},
     net::{SocketAddr, UdpSocket},
     sync::{Arc, Mutex},
-    thread::{self, sleep},
+    thread::{self},
     time::Duration,
 };
 const PATTERN: &str = "Noise_XX_25519_ChaChaPoly_SHA256";
@@ -77,67 +74,6 @@ fn generate_or_load_keypair() -> Result<Keypair, std::io::Error> {
 
     Ok(keypair)
 }
-fn establish_connection(
-    pk: &Vec<u8>,
-    dest: Option<SocketAddr>,
-    sock: &UdpSocket,
-    initiator: bool,
-) -> TransportState {
-    let pattern = "Noise_XX_25519_ChaChaPoly_SHA256";
-
-    let mut message_buffer = vec![0_u8; 65535];
-    let mut recv_buffer = vec![0_u8; 65535];
-
-    let transport = if initiator {
-        let dest = dest.expect("Intitator needs Ip of reciever");
-        let mut noise = Builder::new(pattern.parse().unwrap())
-            .local_private_key(&pk)
-            .unwrap()
-            .build_initiator()
-            .unwrap();
-
-        // ->e
-        let len = noise.write_message(&[], &mut message_buffer).unwrap();
-        sock.send_to(&message_buffer[..len], &dest).unwrap();
-
-        // <- e, ee, s, es
-        let (n_bytes, _src) = sock.recv_from(&mut recv_buffer).unwrap();
-        noise
-            .read_message(&recv_buffer[..n_bytes], &mut message_buffer)
-            .unwrap();
-
-        // -> s, se
-        let len = noise.write_message(&[], &mut message_buffer).unwrap();
-        sock.send_to(&message_buffer[..len], &dest).unwrap();
-        noise.into_transport_mode().unwrap()
-    } else {
-        let mut noise = Builder::new(pattern.parse().unwrap())
-            .local_private_key(&pk)
-            .unwrap()
-            .build_responder()
-            .unwrap();
-
-        let mut message_buffer = vec![0_u8; 65535];
-        let mut recv_buffer = vec![0_u8; 65535];
-        let (n_bytes, src) = sock.recv_from(&mut recv_buffer).unwrap();
-
-        noise
-            .read_message(&recv_buffer[..n_bytes], &mut message_buffer)
-            .unwrap();
-
-        // -> e, ee, s, es
-        let len = noise.write_message(&[], &mut message_buffer).unwrap();
-        sock.send_to(&message_buffer[..len], &src).unwrap();
-        let (n_bytes, _src) = sock.recv_from(&mut recv_buffer).unwrap();
-
-        // <- s, se
-        noise
-            .read_message(&recv_buffer[..n_bytes], &mut message_buffer)
-            .unwrap();
-        noise.into_transport_mode().unwrap()
-    };
-    transport
-}
 fn connect_2(
     &destination: &SocketAddr,
     key: &Arc<Mutex<Keypair>>,
@@ -175,78 +111,9 @@ fn connect_2(
     }
     println!("Connection timed out.");
 }
-// match peers.entry(destination) {
-//     Entry::Occupied(mut occupied_entry) => {
-//         if let Session::Established(state) = occupied_entry.get() {
-//             state
-//         }
-//     }
-//     Entry::Vacant(vacant_entry) => todo!(),
-// }
-
-fn connect(socket: &UdpSocket, mut input: &mut String) -> Option<TransportState> {
-    let keypair = match generate_or_load_keypair() {
-        Ok(kp) => kp,
-        Err(e) => {
-            eprintln!("Fehler beim Laden/Erstellen der Schlüssel: {}", e);
-            return None;
-        }
-    };
-    let private_key = keypair.private;
-    input.clear();
-    println!("Initiator or Responder?");
-    println!("[1] Initiator");
-    println!("[2] Responder");
-    stdin().read_line(&mut input).expect("Failed to read line");
-
-    let response: String = input.parse().unwrap();
-
-    let transport = match response.as_str().trim() {
-        "1" => {
-            input.clear();
-            println!("IP(mit port)?: ");
-            stdin().read_line(&mut input).expect("Failed to read line");
-            let destination = input.trim().parse().unwrap();
-            input.clear();
-
-            let mut transport = establish_connection(&private_key, Some(destination), socket, true);
-            let mut buf = vec![0_u8; 65535];
-            let len = transport
-                .write_message(b"You cant read me OwO", &mut buf)
-                .unwrap();
-            socket.send_to(&buf[..len], &destination).unwrap();
-            return Some(transport);
-        }
-        "2" => {
-            let mut transport = establish_connection(&private_key, None, socket, false);
-
-            let mut recv_buf = vec![0_u8; 65535];
-            let mut dec_buf = vec![0_u8; 65535];
-
-            let (n_bytes, src) = socket.recv_from(&mut recv_buf).unwrap();
-
-            let len = transport
-                .read_message(&recv_buf[..n_bytes], &mut dec_buf)
-                .unwrap();
-
-            println!(
-                "client @ {} said: {}",
-                src,
-                String::from_utf8_lossy(&dec_buf[..len])
-            );
-            return Some(transport);
-        }
-        _ => None,
-    };
-    println!("funktion fertig");
-    input.clear();
-    transport
-}
 
 fn client(socket: UdpSocket) {
     {
-        //let address_book: HashMap<SocketAddr, String> = HashMap::new();
-
         let mut input = String::new();
         let mut destination: SocketAddr = "127.0.0.1:500".parse().expect("ungültige IP");
         let socket_clone = socket.try_clone().expect("couldn't clone the socket");
