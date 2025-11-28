@@ -131,7 +131,7 @@ fn generate_or_load_keypair() -> Result<Keypair, KeyGenerationError> {
     Ok(keypair)
 }
 
-fn connect_2(
+fn connect(
     &destination: &SocketAddr,
     key: &Arc<Mutex<Keypair>>,
     sock: &UdpSocket,
@@ -305,7 +305,7 @@ fn client(socket: UdpSocket) {
                     stdin().read_line(&mut input).expect("Failed to read line");
                     destination = input.trim().parse().unwrap();
                     if let Err(e) =
-                        connect_2(&destination, &key_pair, &socket, Arc::clone(&peer_map))
+                        connect(&destination, &key_pair, &socket, Arc::clone(&peer_map))
                     {
                         println!("couldnt print message due to {}", e);
                     }
