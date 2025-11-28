@@ -2,3 +2,4 @@
 .direnv/
 private.key
 public.key
+.vscode/
