@@ -252,6 +252,31 @@ fn handle_new_connection(
     }
 }
 
+fn send_message(
+    peer_map: &Arc<Mutex<HashMap<SocketAddr, Session>>>,
+    &destination: &SocketAddr,
+    input: &String,
+    socket: &UdpSocket,
+) {
+    let mut peers = peer_map.lock().expect("mutex poisned");
+    if let Some(Session::Established(transport)) = peers.get_mut(&destination) {
+        let mut buf = vec![0_u8; 65535];
+        match transport.write_message(input.trim().as_bytes(), &mut buf) {
+            Ok(len) => match socket.send_to(&buf[..len], &destination) {
+                Ok(_) => {
+                    println!("Es wurden {} bytes gesendet", input.trim().len());
+                }
+                Err(erro) => println!("{}", erro),
+            },
+            Err(_) => println!("couldnt send message"),
+        }
+    } else {
+        println!(
+            "Keine Verbindung zu {}. Bitte erst 'connect' ausführen.",
+            &destination
+        );
+    }
+}
 fn client(socket: UdpSocket) {
     {
         let mut input = String::new();
@@ -366,28 +391,7 @@ fn client(socket: UdpSocket) {
                     input.clear();
                 }
 
-                _ => {
-                    let mut peers = peer_map.lock().expect("mutex poisned");
-                    if let Some(Session::Established(transport)) = peers.get_mut(&destination) {
-                        let mut buf = vec![0_u8; 65535];
-                        match transport.write_message(input.trim().as_bytes(), &mut buf) {
-                            Ok(len) => match socket.send_to(&buf[..len], &destination) {
-                                Ok(_) => {
-                                    println!("Es wurden {} bytes gesendet", input.trim().len());
-                                    input.clear();
-                                }
-                                Err(erro) => println!("{}", erro),
-                            },
-                            Err(_) => println!("couldnt send message"),
-                        }
-                    } else {
-                        println!(
-                            "Keine Verbindung zu {}. Bitte erst 'connect' ausführen.",
-                            destination
-                        );
-                        input.clear();
-                    }
-                }
+                _ => send_message(&peer_map, &destination, &input, &socket),
             };
             input.clear();
         }
