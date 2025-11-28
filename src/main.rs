@@ -48,7 +48,7 @@ impl fmt::Display for ConnectErrors {
 impl fmt::Display for KeyGenerationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            KeyGenerationError::ReadFile(e) => write!(f, "Failed read file: {}", e),
+            KeyGenerationError::ReadFile(e) => write!(f, "Failed to read file: {}", e),
             KeyGenerationError::GenerateKey(e) => write!(f, "Failed to generate key: {}", e),
         }
     }
@@ -88,7 +88,7 @@ impl Packet {
     }
     fn print_message(&self) -> Result<(), Utf8Error> {
         println!(
-            "Naricht: {} von {} bestehend aus {} bytes",
+            "Message: {} from {} consisting of {} bytes",
             str::from_utf8(&self.payload[..self.bytes])?,
             &self.sender,
             &self.bytes
@@ -99,7 +99,7 @@ impl Packet {
         let mut file = File::options().create(true).append(true).open("lol.txt")?;
         writeln!(
             &mut file,
-            "Nachricht: {} von {} bestehend aus {} bytes",
+            "Message: {} from {} consisting of {} bytes",
             String::from_utf8_lossy(&self.payload[..self.bytes]),
             self.sender,
             self.bytes
@@ -112,7 +112,7 @@ impl Packet {
 fn generate_or_load_keypair() -> Result<Keypair, KeyGenerationError> {
     if let Ok(private_key) = fs::read("private.key") {
         if let Ok(public_key) = fs::read("public.key") {
-            println!("Vorhandenes Schlüsselpaar geladen.");
+            println!("Existing keypair loaded.");
             return Ok(Keypair {
                 public: public_key,
                 private: private_key,
@@ -120,13 +120,13 @@ fn generate_or_load_keypair() -> Result<Keypair, KeyGenerationError> {
         }
     }
 
-    println!("Kein Schlüsselpaar gefunden, erstelle ein neues...");
+    println!("No keypair found, creating a new one...");
     let keypair =
         snow::Builder::new(PATTERN.parse().expect("Invalid snow pattern")).generate_keypair()?;
 
     fs::write("private.key", &keypair.private)?;
     fs::write("public.key", &keypair.public)?;
-    println!("Neues Schlüsselpaar in private.key und public.key gespeichert.");
+    println!("New keypair saved to private.key and public.key.");
 
     Ok(keypair)
 }
@@ -137,7 +137,7 @@ fn connect(
     sock: &UdpSocket,
     map: Arc<Mutex<HashMap<SocketAddr, Session>>>,
 ) -> Result<(), ConnectErrors> {
-    if let Some(Session::Established(_)) = map.lock().expect("mutex poisend").get(&destination) {
+    if let Some(Session::Established(_)) = map.lock().expect("mutex poisoned").get(&destination) {
         println!("Connection established!");
         return Ok(());
     }
@@ -152,13 +152,13 @@ fn connect(
     sock.send_to(&message_buffer[..len], &destination)?;
 
     map.lock()
-        .expect("mutex poisend")
+        .expect("mutex poisoned")
         .insert(destination, Session::Handshaking(transport_state));
 
     for n in 1..6 {
         thread::sleep(Duration::from_millis(750));
         println!("Connection is being established {} try", n);
-        if let Some(Session::Established(_)) = map.lock().expect("mutex poisend").get(&destination)
+        if let Some(Session::Established(_)) = map.lock().expect("mutex poisoned").get(&destination)
         {
             println!("Connection established!");
             return Ok(());
@@ -258,21 +258,21 @@ fn send_message(
     input: &String,
     socket: &UdpSocket,
 ) {
-    let mut peers = peer_map.lock().expect("mutex poisned");
+    let mut peers = peer_map.lock().expect("mutex poisoned");
     if let Some(Session::Established(transport)) = peers.get_mut(&destination) {
         let mut buf = vec![0_u8; 65535];
         match transport.write_message(input.trim().as_bytes(), &mut buf) {
             Ok(len) => match socket.send_to(&buf[..len], &destination) {
                 Ok(_) => {
-                    println!("Es wurden {} bytes gesendet", input.trim().len());
+                    println!("{} bytes sent", input.trim().len());
                 }
                 Err(erro) => println!("{}", erro),
             },
-            Err(_) => println!("couldnt send message"),
+            Err(_) => println!("couldn't send message"),
         }
     } else {
         println!(
-            "Keine Verbindung zu {}. Bitte erst 'connect' ausführen.",
+            "No connection to {}. Please run 'connect' first.",
             &destination
         );
     }
@@ -280,12 +280,12 @@ fn send_message(
 fn client(socket: UdpSocket) {
     {
         let mut input = String::new();
-        let mut destination: SocketAddr = "127.0.0.1:500".parse().expect("ungültige IP");
+        let mut destination: SocketAddr = "127.0.0.1:500".parse().expect("invalid IP");
         let socket_clone = socket.try_clone().expect("couldn't clone the socket");
         let packages: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(vec![]));
         let writer = Arc::clone(&packages);
         let key_pair = Arc::new(Mutex::new(
-            generate_or_load_keypair().expect("Couldnt generate keypair"),
+            generate_or_load_keypair().expect("couldn't generate keypair"),
         ));
         let key_pair_clone = Arc::clone(&key_pair);
         let peer_map = Arc::new(Mutex::new(HashMap::<SocketAddr, Session>::new()));
@@ -297,7 +297,7 @@ fn client(socket: UdpSocket) {
             loop {
                 let (bytes, src) = socket_clone
                     .recv_from(&mut recv_buffer)
-                    .expect("Fehler in thread");
+                    .expect("error in thread");
 
                 let mut peers = peer_map_clone.lock().unwrap();
                 let mut session_to_upgrade = None;
@@ -362,12 +362,12 @@ fn client(socket: UdpSocket) {
             match input.trim().as_ref() {
                 "connect" => {
                     input.clear();
-                    println!("IP(mit port)?: ");
+                    println!("IP (with port)?: ");
                     stdin().read_line(&mut input).expect("Failed to read line");
                     destination = input.trim().parse().unwrap();
                     if let Err(e) = connect(&destination, &key_pair, &socket, Arc::clone(&peer_map))
                     {
-                        println!("couldnt print message due to {}", e);
+                        println!("couldn't connect due to {}", e);
                     }
 
                     if let Some(Session::Established(transportstate)) =
@@ -378,16 +378,16 @@ fn client(socket: UdpSocket) {
                         None
                     };
                 }
-                "nachrichten" => {
+                "messages" => {
                     let reader_data = Arc::clone(&packages);
-                    for messages in reader_data.lock().expect("mutex poisened").iter() {
+                    for messages in reader_data.lock().expect("mutex poisoned").iter() {
                         if let Err(e) = messages.print_message() {
                             println!("{}", e);
                         }
                     }
                 }
                 "ip" => {
-                    println!("Deine IP addresse ist: {}", socket.local_addr().unwrap());
+                    println!("Your IP address is: {}", socket.local_addr().unwrap());
                     input.clear();
                 }
 
