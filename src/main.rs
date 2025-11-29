@@ -7,18 +7,10 @@ use std::{
     io::stdin,
     net::{SocketAddr, UdpSocket},
     sync::{Arc, Mutex},
-    thread,
+    thread, vec,
 };
 
-use modules::{
-    crypto::generate_or_load_keypair,
-    network::{
-        connect, handle_established_session, handle_handshake_message, handle_new_connection,
-        send_message,
-    },
-    packet::Packet,
-    session::Session,
-};
+use modules::{crypto::generate_or_load_keypair, network::*, packet::Packet, session::Session};
 
 fn client(socket: UdpSocket) {
     {
@@ -102,7 +94,7 @@ fn client(socket: UdpSocket) {
         loop {
             stdin().read_line(&mut input).expect("Failed to read line");
 
-            match input.trim().as_ref() {
+            match input.trim().to_lowercase().as_ref() {
                 "connect" => {
                     input.clear();
                     println!("IP (with port)?: ");
@@ -132,6 +124,39 @@ fn client(socket: UdpSocket) {
                 "ip" => {
                     println!("Your IP address is: {}", socket.local_addr().unwrap());
                     input.clear();
+                }
+                "contacs" => {
+                    let contacts: Vec<SocketAddr> = peer_map
+                        .lock()
+                        .expect("poisoned mutex")
+                        .keys()
+                        .cloned()
+                        .collect();
+
+                    contacts
+                        .iter()
+                        .enumerate()
+                        .for_each(|(i, key)| println!("[{}] {}", i + 1, key));
+                    println!("[N] Don't connect");
+
+                    input.clear();
+                    stdin().read_line(&mut input).expect("Failed to read line");
+
+                    match input.trim().to_lowercase().as_str() {
+                        "n" => {}
+                        _ => {
+                            if let Ok(number) = input.trim().parse::<usize>() {
+                                if number > 0 && number <= contacts.len() {
+                                    destination = contacts[number - 1];
+                                    println!("Selected: {}", destination);
+                                } else {
+                                    println!("Invalid selection");
+                                }
+                            } else {
+                                println!("Invalid input");
+                            }
+                        }
+                    }
                 }
 
                 _ => send_message(&peer_map, &destination, &input, &socket),
