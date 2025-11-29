@@ -126,37 +126,7 @@ fn client(socket: UdpSocket) {
                     input.clear();
                 }
                 "contacs" => {
-                    let contacts: Vec<SocketAddr> = peer_map
-                        .lock()
-                        .expect("poisoned mutex")
-                        .keys()
-                        .cloned()
-                        .collect();
-
-                    contacts
-                        .iter()
-                        .enumerate()
-                        .for_each(|(i, key)| println!("[{}] {}", i + 1, key));
-                    println!("[N] Don't connect");
-
-                    input.clear();
-                    stdin().read_line(&mut input).expect("Failed to read line");
-
-                    match input.trim().to_lowercase().as_str() {
-                        "n" => {}
-                        _ => {
-                            if let Ok(number) = input.trim().parse::<usize>() {
-                                if number > 0 && number <= contacts.len() {
-                                    destination = contacts[number - 1];
-                                    println!("Selected: {}", destination);
-                                } else {
-                                    println!("Invalid selection");
-                                }
-                            } else {
-                                println!("Invalid input");
-                            }
-                        }
-                    }
+                    destination = contacs(&peer_map).unwrap_or(destination);
                 }
 
                 _ => send_message(&peer_map, &destination, &input, &socket),

@@ -1,18 +1,14 @@
 use snow::{Builder, Keypair};
 use std::{
     collections::HashMap,
+    io::stdin,
     net::{SocketAddr, UdpSocket},
     sync::{Arc, Mutex},
     thread,
     time::Duration,
 };
 
-use super::{
-    crypto::PATTERN,
-    error::ConnectErrors,
-    packet::Packet,
-    session::Session,
-};
+use super::{crypto::PATTERN, error::ConnectErrors, packet::Packet, session::Session};
 
 pub fn connect(
     &destination: &SocketAddr,
@@ -158,5 +154,40 @@ pub fn send_message(
             "No connection to {}. Please run 'connect' first.",
             &destination
         );
+    }
+}
+pub fn contacs(peer_map: &Arc<Mutex<HashMap<SocketAddr, Session>>>) -> Option<SocketAddr> {
+    let contacts: Vec<SocketAddr> = peer_map
+        .lock()
+        .expect("poisoned mutex")
+        .keys()
+        .cloned()
+        .collect();
+    let mut input = String::new();
+
+    contacts
+        .iter()
+        .enumerate()
+        .for_each(|(i, key)| println!("[{}] {}", i + 1, key));
+    println!("[N] Don't connect");
+    stdin().read_line(&mut input).expect("Failed to read line");
+
+    match input.trim().to_lowercase().as_str() {
+        "n" => None,
+        _ => {
+            if let Ok(number) = input.trim().parse::<usize>() {
+                if number > 0 && number <= contacts.len() {
+                    let destination = contacts[number - 1];
+                    println!("Selected: {}", destination);
+                    Some(destination)
+                } else {
+                    println!("Invalid selection");
+                    None
+                }
+            } else {
+                println!("Invalid input");
+                None
+            }
+        }
     }
 }
