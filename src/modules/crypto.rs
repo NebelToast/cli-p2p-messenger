@@ -6,15 +6,14 @@ use super::error::KeyGenerationError;
 pub const PATTERN: &str = "Noise_XX_25519_ChaChaPoly_SHA256";
 
 pub fn generate_or_load_keypair() -> Result<Keypair, KeyGenerationError> {
-    if let Ok(private_key) = fs::read("private.key") {
-        if let Ok(public_key) = fs::read("public.key") {
+    if let Ok(private_key) = fs::read("private.key")
+        && let Ok(public_key) = fs::read("public.key") {
             println!("Existing keypair loaded.");
             return Ok(Keypair {
                 public: public_key,
                 private: private_key,
             });
         }
-    }
 
     println!("No keypair found, creating a new one...");
     let keypair =

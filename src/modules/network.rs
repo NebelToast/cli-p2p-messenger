@@ -28,7 +28,7 @@ pub fn connect(
 
     let len = transport_state.write_message(&[], &mut message_buffer)?;
 
-    sock.send_to(&message_buffer[..len], &destination)?;
+    sock.send_to(&message_buffer[..len], destination)?;
 
     map.lock()
         .expect("mutex poisoned")
@@ -87,7 +87,7 @@ pub fn handle_handshake_message(
     if !handshake.is_handshake_finished() {
         match handshake.write_message(&[], &mut message_buffer) {
             Ok(len) => {
-                let _ = socket.send_to(&message_buffer[..len], &src);
+                let _ = socket.send_to(&message_buffer[..len], src);
             }
             Err(e) => println!("Failed to write handshake message: {}", e),
         }
@@ -121,7 +121,7 @@ pub fn handle_new_connection(
 
     match transport_state.write_message(&[], &mut message_buffer) {
         Ok(len) => {
-            let _ = socket.send_to(&message_buffer[..len], &src);
+            let _ = socket.send_to(&message_buffer[..len], src);
             Some(transport_state)
         }
         Err(e) => {
@@ -134,14 +134,14 @@ pub fn handle_new_connection(
 pub fn send_message(
     peer_map: &Arc<Mutex<HashMap<SocketAddr, Session>>>,
     &destination: &SocketAddr,
-    input: &String,
+    input: &str,
     socket: &UdpSocket,
 ) {
     let mut peers = peer_map.lock().expect("mutex poisoned");
     if let Some(Session::Established(transport)) = peers.get_mut(&destination) {
         let mut buf = vec![0_u8; 65535];
         match transport.write_message(input.trim().as_bytes(), &mut buf) {
-            Ok(len) => match socket.send_to(&buf[..len], &destination) {
+            Ok(len) => match socket.send_to(&buf[..len], destination) {
                 Ok(_) => {
                     println!("{} bytes sent", input.trim().len());
                 }
