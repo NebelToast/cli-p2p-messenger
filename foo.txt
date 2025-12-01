@@ -1,5 +1,0 @@
-Nachricht: aha von 192.168.1.102:34255 bestehend aus 3 bytesNachricht: wdwd von 192.168.1.102:34255 bestehend aus 4 bytes
-Nachricht: wdw von 192.168.1.102:34255 bestehend aus 3 bytes
-Nachricht: f von 192.168.1.102:34255 bestehend aus 1 bytes
-Nachricht: g von 192.168.1.102:34255 bestehend aus 1 bytes
-Nachricht: h von 192.168.1.102:34255 bestehend aus 1 bytes
