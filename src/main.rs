@@ -126,7 +126,7 @@ fn client(socket: UdpSocket) {
                     println!("Your IP address is: {}", socket.local_addr().unwrap());
                     input.clear();
                 }
-                "contacs" => {
+                "contacts" => {
                     destination = contacs(&peer_map).unwrap_or(destination);
                 }
 
