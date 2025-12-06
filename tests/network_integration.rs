@@ -1,6 +1,8 @@
 use networktesting::modules::{
     crypto::{PATTERN, generate_or_load_keypair},
-    network::{handle_established_session, handle_new_connection, send_message},
+    network::{
+        handle_established_session, handle_handshake_message, handle_new_connection, send_message,
+    },
     packet::Packet,
     session::Session,
 };
@@ -113,4 +115,32 @@ fn test_send_message_delivers_encrypted_message() {
         std::str::from_utf8(&plaintext[..plaintext_len]).unwrap(),
         "Test message"
     );
+}
+
+#[test]
+fn test_handle_handshake_message() {
+    let mut initiator = Builder::new(PATTERN.parse().unwrap())
+        .local_private_key(&create_keypair().private)
+        .unwrap()
+        .build_initiator()
+        .unwrap();
+    let mut responder = Builder::new(PATTERN.parse().unwrap())
+        .local_private_key(&create_keypair().private)
+        .unwrap()
+        .build_responder()
+        .unwrap();
+
+    let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let src: SocketAddr = "127.0.0.1:7777".parse().unwrap();
+    let mut buf = [0u8; 65535];
+    let mut tmp = [0u8; 65535];
+
+    let len = initiator.write_message(&[], &mut buf).unwrap();
+    responder.read_message(&buf[..len], &mut tmp).unwrap();
+    let len = responder.write_message(&[], &mut buf).unwrap();
+
+    let finished = handle_handshake_message(&mut initiator, &buf, len, src, &socket);
+
+    assert!(finished);
+    assert!(initiator.is_handshake_finished());
 }
