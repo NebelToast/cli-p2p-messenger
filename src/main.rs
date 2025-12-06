@@ -129,6 +129,16 @@ fn client(socket: UdpSocket) {
                 "contacts" => {
                     destination = contacs(&peer_map).unwrap_or(destination);
                 }
+                "help" => {
+                    println!(
+                        "\nconnect: connect to a new or already known client
+messages: print received messages
+ip: print own ip
+contacts: select from known contacts
+help: display help
+<text>: send message to current destination"
+                    );
+                }
 
                 _ => send_message(&peer_map, &destination, &input, &socket),
             };
