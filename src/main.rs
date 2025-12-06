@@ -6,6 +6,7 @@ use std::{
     env,
     io::stdin,
     net::{SocketAddr, UdpSocket},
+    path::Path,
     sync::{Arc, Mutex},
     thread, vec,
 };
@@ -20,7 +21,7 @@ fn client(socket: UdpSocket) {
         let packages: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(vec![]));
         let writer = Arc::clone(&packages);
         let key_pair = Arc::new(Mutex::new(
-            generate_or_load_keypair().expect("couldn't generate keypair"),
+            generate_or_load_keypair(Path::new(".")).expect("couldn't generate keypair"),
         ));
         let key_pair_clone = Arc::clone(&key_pair);
         let peer_map = Arc::new(Mutex::new(HashMap::<SocketAddr, Session>::new()));
