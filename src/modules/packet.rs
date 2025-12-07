@@ -2,6 +2,7 @@ use std::{
     fs::File,
     io::{self, Write},
     net::SocketAddr,
+    path::Path,
     str::Utf8Error,
 };
 
@@ -30,8 +31,11 @@ impl Packet {
         Ok(())
     }
 
-    pub fn _save_message(&self) -> Result<(), io::Error> {
-        let mut file = File::options().create(true).append(true).open("lol.txt")?;
+    pub fn _save_message(&self, dir: &Path) -> Result<(), io::Error> {
+        let mut file = File::options()
+            .create(true)
+            .append(true)
+            .open(dir.join("messages.txt"))?;
         writeln!(
             &mut file,
             "Message: {} from {} consisting of {} bytes",
@@ -45,6 +49,10 @@ impl Packet {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
     use super::*;
 
     #[test]
@@ -87,5 +95,28 @@ mod tests {
 
         let packet = Packet::new(addr, msg.len(), Box::new(payload));
         assert!(packet.print_message().is_ok());
+    }
+    #[test]
+    fn test_save_message() {
+        let dir = tempdir().unwrap();
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        let mut payload = [0u8; 65535];
+        let msg = b"File contents";
+        payload[..msg.len()].copy_from_slice(msg);
+
+        let packet = Packet::new(addr, msg.len(), Box::new(payload));
+
+        assert!(packet._save_message(dir.path()).is_ok());
+        assert_eq!(
+            fs::read_to_string(dir.path().join("messages.txt"))
+                .unwrap()
+                .trim(),
+            format!(
+                "Message: {} from {} consisting of {} bytes",
+                String::from_utf8_lossy(&payload[..msg.len()]),
+                addr,
+                msg.len()
+            )
+        )
     }
 }
