@@ -19,9 +19,9 @@
     devShells.${system}.default = pkgs.mkShell {
       packages = [
         toolchain
-        pkgs.rust-analyzer-unwrapped 
-
-
+        pkgs.rust-analyzer-unwrapped
+        pkgs.cargo-nextest
+        pkgs.cargo-llvm-cov
       ];
 
 

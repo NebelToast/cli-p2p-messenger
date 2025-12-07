@@ -1,5 +1,3 @@
-mod modules;
-
 use local_ip_address::local_ip;
 use std::{
     collections::{HashMap, hash_map::Entry},
@@ -11,7 +9,7 @@ use std::{
     thread, vec,
 };
 
-use modules::{crypto::generate_or_load_keypair, network::*, packet::Packet, session::Session};
+use networktesting::{crypto::generate_or_load_keypair, network::*, packet::Packet, session::Session};
 
 fn client(socket: UdpSocket) {
     {
