@@ -1,4 +1,5 @@
 # cli-p2p-messenger
+[![codecov](https://codecov.io/github/nebeltoast/cli-p2p-messenger/branch/main/graph/badge.svg?token=PGSQC2KZVA)](https://codecov.io/github/nebeltoast/cli-p2p-messenger)
 
 A secure, peer-to-peer command-line messenger written in Rust. This tool establishes encrypted communication channels directly between clients using UDP and the Noise Protocol Framework.
 
