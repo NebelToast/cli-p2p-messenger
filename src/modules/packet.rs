@@ -120,3 +120,16 @@ mod tests {
         )
     }
 }
+
+#[test]
+fn test_save_message_error() {
+    let dir = Path::new("invalid");
+    let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+    let mut payload = [0u8; 65535];
+    let msg = b"File contents";
+    payload[..msg.len()].copy_from_slice(msg);
+
+    let packet = Packet::new(addr, msg.len(), Box::new(payload));
+
+    assert!(packet._save_message(dir).is_err());
+}
