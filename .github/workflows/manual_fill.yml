@@ -1,0 +1,39 @@
+name: Manual Coverage Backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_ref:
+        description: 'Commit SHA (Hash) to process'
+        required: true
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.commit_ref }}
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Generate code coverage
+        run: cargo llvm-cov --ignore-filename-regex 'src/main\.rs|nix/store' --all-features --workspace --lcov --output-path lcov.info
+
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: lcov.info
+          fail_ci_if_error: false
+          commit_parent: ${{ inputs.commit_ref }} 
+          override_commit_sha: ${{ inputs.commit_ref }}
