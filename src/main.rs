@@ -12,6 +12,63 @@ use std::{
 use networktesting::{
     crypto::generate_or_load_keypair, network::*, packet::Packet, session::Session,
 };
+fn set_destination(peer_map: &Arc<Mutex<HashMap<SocketAddr, Session>>>) -> Option<SocketAddr> {
+    let contacts: Vec<SocketAddr> = peer_map
+        .lock()
+        .expect("poisoned mutex")
+        .keys()
+        .cloned()
+        .collect();
+    let mut input = String::new();
+    if !contacts.is_empty() {
+        println!(
+            "Do you want to connect to a known client?
+        [Y]: yes
+        [N]: no"
+        );
+        stdin().read_line(&mut input).unwrap();
+    } else {
+        input = "n".to_string();
+    }
+
+    match input.trim().to_lowercase().as_str() {
+        "n" => {
+            println!("IP (with port)?: ");
+            input.clear();
+            stdin().read_line(&mut input).expect("Failed to read line");
+            match input.trim().parse() {
+                Ok(destination) => Some(destination),
+                Err(_) => None,
+            }
+        }
+        "y" => {
+            contacts
+                .iter()
+                .enumerate()
+                .for_each(|(i, key)| println!("[{}] {}", i + 1, key));
+            input.clear();
+            stdin().read_line(&mut input).unwrap();
+
+            if let Ok(number) = input.trim().parse::<usize>() {
+                if number > 0 && number <= contacts.len() {
+                    let destination = contacts[number - 1];
+                    println!("Selected: {}", destination);
+                    Some(destination)
+                } else {
+                    println!("Invalid selection");
+                    None
+                }
+            } else {
+                println!("Invalid input");
+                None
+            }
+        }
+        _ => {
+            println!("Invalid input");
+            None
+        }
+    }
+}
 
 fn client(socket: UdpSocket) {
     {
@@ -49,24 +106,17 @@ fn client(socket: UdpSocket) {
             stdin().read_line(&mut input).expect("Failed to read line");
 
             match input.trim().to_lowercase().as_ref() {
-                "connect" => {
-                    input.clear();
-                    println!("IP (with port)?: ");
-                    stdin().read_line(&mut input).expect("Failed to read line");
-                    destination = input.trim().parse().unwrap();
-                    if let Err(e) = connect(&destination, &key_pair, &socket, Arc::clone(&peer_map))
-                    {
-                        println!("couldn't connect due to {}", e);
+                "connect" => match set_destination(&peer_map) {
+                    Some(new_destination) => {
+                        destination = new_destination;
+                        match connect(&destination, &key_pair, &socket, peer_map.clone()) {
+                            Ok(_) => println!("connection established"),
+                            Err(_) => println!("couldn't connect"),
+                        }
                     }
+                    None => println!("coudln't get client ip"),
+                },
 
-                    if let Some(Session::Established(transportstate)) =
-                        Some(peer_map.lock().unwrap().get(&destination).unwrap())
-                    {
-                        Some(transportstate)
-                    } else {
-                        None
-                    };
-                }
                 "messages" => {
                     let reader_data = Arc::clone(&packages);
                     for messages in reader_data.lock().expect("mutex poisoned").iter() {
@@ -80,7 +130,12 @@ fn client(socket: UdpSocket) {
                     input.clear();
                 }
                 "contacts" => {
-                    destination = contacts(&peer_map).unwrap_or(destination);
+                    peer_map
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .enumerate()
+                        .for_each(|(i, (addr, _))| println!("[{}] {}", i + 1, addr));
                 }
                 "help" => {
                     println!(
