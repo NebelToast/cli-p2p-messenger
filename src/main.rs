@@ -80,7 +80,7 @@ fn client(socket: UdpSocket) {
                     input.clear();
                 }
                 "contacts" => {
-                    destination = contacs(&peer_map).unwrap_or(destination);
+                    destination = contacts(&peer_map).unwrap_or(destination);
                 }
                 "help" => {
                     println!(

@@ -156,7 +156,7 @@ pub fn send_message(
         );
     }
 }
-pub fn contacs(peer_map: &Arc<Mutex<HashMap<SocketAddr, Session>>>) -> Option<SocketAddr> {
+pub fn contacts(peer_map: &Arc<Mutex<HashMap<SocketAddr, Session>>>) -> Option<SocketAddr> {
     let contacts: Vec<SocketAddr> = peer_map
         .lock()
         .expect("poisoned mutex")
