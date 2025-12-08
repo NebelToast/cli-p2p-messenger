@@ -1,6 +1,6 @@
 use snow::{Builder, Keypair};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, hash_map::Entry},
     io::stdin,
     net::{SocketAddr, UdpSocket},
     sync::{Arc, Mutex},
@@ -187,6 +187,57 @@ pub fn contacs(peer_map: &Arc<Mutex<HashMap<SocketAddr, Session>>>) -> Option<So
             } else {
                 println!("Invalid input");
                 None
+            }
+        }
+    }
+}
+
+pub fn handle_incoming_packets(
+    recv_buffer: &[u8],
+    bytes: usize,
+    src: SocketAddr,
+    socket_clone: &UdpSocket,
+    key_pair_clone: &Arc<Mutex<snow::Keypair>>,
+    peers: &Arc<Mutex<HashMap<SocketAddr, Session>>>,
+    writer: &Arc<Mutex<Vec<Packet>>>,
+) {
+    let mut peers = peers.lock().unwrap();
+    let mut session_to_upgrade = None;
+
+    match peers.entry(src) {
+        Entry::Occupied(mut entry) => {
+            let finished = match entry.get_mut() {
+                Session::Established(transport) => {
+                    handle_established_session(transport, recv_buffer, bytes, src, &writer);
+                    false
+                }
+                Session::Handshaking(handshake) => {
+                    handle_handshake_message(handshake, recv_buffer, bytes, src, socket_clone)
+                }
+            };
+            if finished {
+                session_to_upgrade = Some(entry.remove());
+            }
+        }
+        Entry::Vacant(entry) => {
+            if let Some(handshake) =
+                handle_new_connection(&recv_buffer, bytes, src, socket_clone, key_pair_clone)
+            {
+                entry.insert(Session::Handshaking(handshake));
+            } else {
+                println!("new connection failed");
+            }
+        }
+    }
+
+    if let Some(Session::Handshaking(handshake)) = session_to_upgrade {
+        match handshake.into_transport_mode() {
+            Ok(transport) => {
+                peers.insert(src, Session::Established(transport));
+            }
+            Err(_) => {
+                println!("couldn't transform handshake to transport state");
+                peers.remove(&src);
             }
         }
     }

@@ -1,6 +1,6 @@
 use local_ip_address::local_ip;
 use std::{
-    collections::{HashMap, hash_map::Entry},
+    collections::HashMap,
     env,
     io::stdin,
     net::{SocketAddr, UdpSocket},
@@ -9,7 +9,9 @@ use std::{
     thread, vec,
 };
 
-use networktesting::{crypto::generate_or_load_keypair, network::*, packet::Packet, session::Session};
+use networktesting::{
+    crypto::generate_or_load_keypair, network::*, packet::Packet, session::Session,
+};
 
 fn client(socket: UdpSocket) {
     {
@@ -27,69 +29,22 @@ fn client(socket: UdpSocket) {
 
         thread::spawn(move || {
             let mut recv_buffer = [0_u8; 65535];
-
             loop {
                 let (bytes, src) = socket_clone
                     .recv_from(&mut recv_buffer)
                     .expect("error in thread");
 
-                let mut peers = peer_map_clone.lock().unwrap();
-                let mut session_to_upgrade = None;
-
-                match peers.entry(src) {
-                    Entry::Occupied(mut entry) => {
-                        let finished = match entry.get_mut() {
-                            Session::Established(transport) => {
-                                handle_established_session(
-                                    transport,
-                                    &recv_buffer,
-                                    bytes,
-                                    src,
-                                    &writer,
-                                );
-                                false
-                            }
-                            Session::Handshaking(handshake) => handle_handshake_message(
-                                handshake,
-                                &recv_buffer,
-                                bytes,
-                                src,
-                                &socket_clone,
-                            ),
-                        };
-                        if finished {
-                            session_to_upgrade = Some(entry.remove());
-                        }
-                    }
-                    Entry::Vacant(entry) => {
-                        if let Some(handshake) = handle_new_connection(
-                            &recv_buffer,
-                            bytes,
-                            src,
-                            &socket_clone,
-                            &key_pair_clone,
-                        ) {
-                            entry.insert(Session::Handshaking(handshake));
-                        } else {
-                            println!("new connection failed");
-                        }
-                    }
-                }
-
-                if let Some(Session::Handshaking(handshake)) = session_to_upgrade {
-                    match handshake.into_transport_mode() {
-                        Ok(transport) => {
-                            peers.insert(src, Session::Established(transport));
-                        }
-                        Err(_) => {
-                            println!("couldn't transform handshake to transport state");
-                            peers.remove(&src);
-                        }
-                    }
-                }
+                handle_incoming_packets(
+                    &recv_buffer,
+                    bytes,
+                    src,
+                    &socket_clone,
+                    &key_pair_clone,
+                    &peer_map_clone,
+                    &writer,
+                );
             }
         });
-
         loop {
             stdin().read_line(&mut input).expect("Failed to read line");
 
