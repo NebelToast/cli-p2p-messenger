@@ -326,12 +326,14 @@ fn test_connect_to_new_peer() {
     let peer_map_clone = Arc::clone(&peer_map);
 
     thread::spawn(move || {
-        thread::sleep(Duration::from_millis(500));
-
-        let mut peers = peer_map_clone.lock().unwrap();
-        if let Some(Session::Handshaking(_)) = peers.remove(&destination) {
-            let (_, transport) = complete_handshake();
-            peers.insert(destination, Session::Established(transport));
+        loop {
+            thread::sleep(Duration::from_millis(100));
+            let mut peers = peer_map_clone.lock().unwrap();
+            if let Some(Session::Handshaking(_)) = peers.remove(&destination) {
+                let (_, transport) = complete_handshake();
+                peers.insert(destination, Session::Established(transport));
+                break;
+            }
         }
     });
 
