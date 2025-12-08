@@ -39,11 +39,9 @@ pub fn connect(
         println!("Connection is being established {} try", n);
         if let Some(Session::Established(_)) = map.lock().expect("mutex poisoned").get(&destination)
         {
-            println!("Connection established!");
             return Ok(());
         }
     }
-    println!("Connection timed out.");
     Err(ConnectErrors::Timeout)
 }
 
