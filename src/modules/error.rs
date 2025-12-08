@@ -55,3 +55,36 @@ impl From<snow::Error> for KeyGenerationError {
         KeyGenerationError::GenerateKey(error)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_connecterror_formating_send_message() {
+        let err = ConnectErrors::SendMessage(io::Error::new(io::ErrorKind::Other, "test error"));
+        assert_eq!(err.to_string(), "Failed to send message: test error");
+    }
+    #[test]
+    fn test_connecterror_formating_timeout() {
+        let err = ConnectErrors::Timeout;
+        assert_eq!(err.to_string(), "Connection timed out");
+    }
+    #[test]
+    fn test_connecterror_formating_generate_key() {
+        let err = ConnectErrors::GenerateKey(snow::Error::Input);
+        assert_eq!(err.to_string(), "Failed to generate key: input error");
+    }
+
+    #[test]
+    fn test_keygenerationerror_read_file() {
+        let err = KeyGenerationError::ReadFile(io::Error::new(io::ErrorKind::Other, "read error"));
+        assert_eq!(err.to_string(), "Failed to read file: read error");
+    }
+
+    #[test]
+    fn test_keygenerationerror_generate_key() {
+        let err = KeyGenerationError::GenerateKey(snow::Error::Input);
+        assert_eq!(err.to_string(), "Failed to generate key: input error");
+    }
+}
