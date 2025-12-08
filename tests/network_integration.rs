@@ -8,13 +8,14 @@ use networktesting::{
         packet::Packet,
         session::Session,
     },
-    network::handle_incoming_packets,
+    network::{connect, handle_incoming_packets},
 };
 use snow::Builder;
 use std::{
     collections::HashMap,
     net::{SocketAddr, UdpSocket},
     sync::{Arc, Mutex},
+    thread,
     time::Duration,
 };
 use tempfile::tempdir;
@@ -293,4 +294,80 @@ fn test_send_message_no_connection() {
     let receiver_addr = receiver_socket.local_addr().unwrap();
 
     send_message(&peer_map, &receiver_addr, "Test message", &sender_socket);
+}
+#[test]
+fn test_connect_to_known_peer() {
+    let (sender_transport, _receiver_transport) = complete_handshake();
+    let peer_map: Arc<Mutex<HashMap<SocketAddr, Session>>> = Arc::new(Mutex::new(HashMap::new()));
+    let keypair = Arc::new(Mutex::new(create_keypair()));
+
+    let sender_socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let receiver_socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    receiver_socket
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .unwrap();
+
+    let sender_addr = sender_socket.local_addr().unwrap();
+
+    peer_map
+        .lock()
+        .unwrap()
+        .insert(sender_addr, Session::Established(sender_transport));
+    assert!(connect(&sender_addr, &keypair, &receiver_socket, peer_map).is_ok())
+}
+
+#[test]
+fn test_connect_to_new_peer() {
+    let keypair = Arc::new(Mutex::new(create_keypair()));
+    let peer_map: Arc<Mutex<HashMap<SocketAddr, Session>>> = Arc::new(Mutex::new(HashMap::new()));
+    let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let destination: SocketAddr = "127.0.0.1:7777".parse().unwrap();
+
+    let peer_map_clone = Arc::clone(&peer_map);
+
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(500));
+
+        let mut peers = peer_map_clone.lock().unwrap();
+        if let Some(Session::Handshaking(_)) = peers.remove(&destination) {
+            let (_, transport) = complete_handshake();
+            peers.insert(destination, Session::Established(transport));
+        }
+    });
+
+    let result = connect(&destination, &keypair, &socket, peer_map);
+
+    assert!(result.is_ok());
+}
+#[test]
+fn test_connect_timeout() {
+    let keypair = Arc::new(Mutex::new(create_keypair()));
+    let peer_map: Arc<Mutex<HashMap<SocketAddr, Session>>> = Arc::new(Mutex::new(HashMap::new()));
+    let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let destination: SocketAddr = "127.0.0.1:8888".parse().unwrap();
+    assert!(connect(&destination, &keypair, &socket, peer_map).is_err())
+}
+#[test]
+fn test_decrypted_message_error() {
+    let (mut sender, mut reciever) = complete_handshake();
+    let peer_map: Arc<Mutex<HashMap<SocketAddr, Session>>> = Arc::new(Mutex::new(HashMap::new()));
+    let keypair = Arc::new(Mutex::new(create_keypair()));
+
+    let packets: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(vec![]));
+
+    let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let src: SocketAddr = "127.0.0.1:3333".parse().unwrap();
+    reciever.set_receiving_nonce(10);
+    peer_map
+        .lock()
+        .unwrap()
+        .insert(src, Session::Established(reciever));
+
+    let mut buf = [0u8; 65535];
+    let len = sender.write_message(b"invalod", &mut buf).unwrap();
+
+    handle_incoming_packets(&buf, len, src, &socket, &keypair, &peer_map, &packets);
+
+    let stored = packets.lock().unwrap();
+    assert!(stored.is_empty());
 }
