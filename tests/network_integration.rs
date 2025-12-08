@@ -280,3 +280,17 @@ fn test_decrypted_message_stored() {
     let stored = packets.lock().unwrap();
     assert_eq!(&stored[0].payload[..stored[0].bytes], b"Established");
 }
+
+#[test]
+fn test_send_message_no_connection() {
+    let peer_map: Arc<Mutex<HashMap<SocketAddr, Session>>> = Arc::new(Mutex::new(HashMap::new()));
+
+    let sender_socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let receiver_socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    receiver_socket
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .unwrap();
+    let receiver_addr = receiver_socket.local_addr().unwrap();
+
+    send_message(&peer_map, &receiver_addr, "Test message", &sender_socket);
+}
