@@ -87,4 +87,28 @@ mod tests {
         let err = KeyGenerationError::GenerateKey(snow::Error::Input);
         assert_eq!(err.to_string(), "Failed to generate key: input error");
     }
+    #[test]
+    fn test_io_to_key_generation_error() {
+        let err = io::Error::new(io::ErrorKind::Other, "test error");
+        let key_err: KeyGenerationError = err.into();
+        assert!(matches!(key_err, KeyGenerationError::ReadFile(_)))
+    }
+    #[test]
+    fn test_io_to_connect_error() {
+        let err = io::Error::new(io::ErrorKind::Other, "test error");
+        let connect_err: ConnectErrors = err.into();
+        assert!(matches!(connect_err, ConnectErrors::SendMessage(_)))
+    }
+    #[test]
+    fn test_snow_to_connect_error() {
+        let err = snow::Error::Input;
+        let connect_err: ConnectErrors = err.into();
+        assert!(matches!(connect_err, ConnectErrors::GenerateKey(_)))
+    }
+    #[test]
+    fn test_snow_to_key_generation_error() {
+        let err = snow::Error::Input;
+        let key_err: KeyGenerationError = err.into();
+        assert!(matches!(key_err, KeyGenerationError::GenerateKey(_)))
+    }
 }
