@@ -52,12 +52,14 @@ IP (with port)?:
 **Once the handshake is successful (Connection established!), you can start typing messages.**
 
 ## Commands
-**connect** Initiate a secure handshake with a peer (requires IP:Port).
+**connect** Connect to new or known peer.
 
 **messages** Print the history of received messages.
 
-**ip** Display your current local IP address and port.
+**ip** Display your current IP address and port.
 
-**contacs** List connected peers and select an active destination for messaging.
+**contacs** List known peers.
 
-**Any text** Sends the text as a message to the currently selected destination.
+**help** Display help for commands
+
+**\<text>** Send message to current destination.
