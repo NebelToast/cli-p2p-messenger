@@ -139,12 +139,12 @@ fn client(socket: UdpSocket) {
                 }
                 "help" => {
                     println!(
-                        "\nconnect: connect to a new or already known client
-messages: print received messages
-ip: print own ip
-contacts: select from known contacts
-help: display help
-<text>: send message to current destination"
+                        "\nconnect: Connect to new or known peer.
+messages: Print the history of received messages.
+ip: Display your current IP address and port.
+contacts: List known peers.
+help: Display help for commands.
+<text>: Send message to current destination"
                     );
                 }
 
