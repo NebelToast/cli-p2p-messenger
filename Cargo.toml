@@ -6,6 +6,10 @@ edition = "2024"
 [dependencies]
 local-ip-address = "0.6.5"
 snow = "0.10.0"
+ring = "0.17"
+hex = "0.4"
+serde_json = "1.0.145"
+serde = { version = "1.0.228", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3.23.0"

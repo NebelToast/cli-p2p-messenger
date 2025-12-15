@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
     io::{self, Write},
@@ -6,6 +7,7 @@ use std::{
     str::Utf8Error,
 };
 
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Packet {
     pub sender: SocketAddr,
     pub bytes: usize,

@@ -1,7 +1,7 @@
 use local_ip_address::local_ip;
 use std::{
     collections::HashMap,
-    env,
+    env, fs,
     io::stdin,
     net::{SocketAddr, UdpSocket},
     path::Path,
@@ -73,13 +73,22 @@ fn client(socket: UdpSocket) {
         let mut input = String::new();
         let mut destination: SocketAddr = "127.0.0.1:500".parse().expect("invalid IP");
         let socket_clone = socket.try_clone().expect("couldn't clone the socket");
-        let packages: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(vec![]));
+        let loaded_messages: Vec<Packet> = match fs::read("messages.json") {
+            Ok(data) => serde_json::from_slice(&data).unwrap_or_default(),
+            Err(_) => vec![],
+        };
+        let packages: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(loaded_messages));
         let writer = Arc::clone(&packages);
         let key_pair = Arc::new(Mutex::new(
             generate_or_load_keypair(Path::new(".")).expect("couldn't generate keypair"),
         ));
         let key_pair_clone = Arc::clone(&key_pair);
-        let peer_map = Arc::new(Mutex::new(HashMap::<SocketAddr, Peer>::new()));
+
+        let loaded_peers: HashMap<SocketAddr, Peer> = match fs::read("peers.json") {
+            Ok(data) => serde_json::from_slice(&data).unwrap_or_default(),
+            Err(_) => HashMap::new(),
+        };
+        let peer_map = Arc::new(Mutex::new(loaded_peers));
         let peer_map_clone = Arc::clone(&peer_map);
 
         thread::spawn(move || {
@@ -108,7 +117,20 @@ fn client(socket: UdpSocket) {
                     Some(new_destination) => {
                         destination = new_destination;
                         match connect(&destination, &key_pair, &socket, peer_map.clone()) {
-                            Ok(_) => println!("connection established"),
+                            Ok(_) => {
+                                println!(
+                                    "Peer is unknown. Do you want to connect to Peer with Fingerprint: {}
+[y] yes
+[n] no",
+peer_map.lock().unwrap().get(&destination).unwrap().fingerprint());
+                                input.clear();
+                                stdin().read_line(&mut input).expect("Failed to read line");
+                                if input.trim().to_lowercase() == "y" {
+                                } else {
+                                    peer_map.lock().unwrap().remove(&destination);
+                                }
+                            }
+
                             Err(e) => println!("{}", e),
                         }
                     }
@@ -135,6 +157,18 @@ fn client(socket: UdpSocket) {
                         .enumerate()
                         .for_each(|(i, (addr, _))| println!("[{}] {}", i + 1, addr));
                 }
+                "save" => {
+                    let serialized_peers =
+                        serde_json::to_string(&*peer_map.lock().unwrap()).unwrap();
+                    std::fs::write("peers.json", serialized_peers).expect("Unable to write file");
+
+                    let serialized_messages =
+                        serde_json::to_string(&*packages.lock().unwrap()).unwrap();
+                    std::fs::write("messages.json", serialized_messages)
+                        .expect("Unable to write file");
+
+                    println!("Saved peers to peers.json and messages to messages.json");
+                }
                 "help" => {
                     println!(
                         "\nconnect: Connect to new or known peer.
@@ -142,6 +176,7 @@ messages: Print the history of received messages.
 ip: Display your current IP address and port.
 contacts: List known peers.
 help: Display help for commands.
+save: Saves the connections to a file
 <text>: Send message to current destination"
                     );
                 }
