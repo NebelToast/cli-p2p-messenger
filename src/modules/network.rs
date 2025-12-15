@@ -89,7 +89,7 @@ pub fn handle_established_session(
         }
     };
 
-    let packet = Packet::new(src, len, Box::new(message_buffer));
+    let packet = Packet::new(src, len, message_buffer[..len].to_vec().into_boxed_slice());
     if let Err(e) = packet.print_message() {
         print!("{}", e);
     }
