@@ -1,4 +1,5 @@
 pub enum Session {
+    None,
     Handshaking(snow::HandshakeState),
     Established(snow::TransportState),
 }

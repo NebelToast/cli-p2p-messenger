@@ -28,15 +28,17 @@ pub fn connect(
         }
     }
     let mut transport_state = if static_key {
+        println!("Using Noise_KK pattern (known peer)");
         Builder::new(
             "Noise_KK_25519_ChaChaPoly_SHA256"
                 .parse()
                 .expect("Invalid snow pattern"),
         )
         .local_private_key(&key.lock().unwrap().private)?
-        .remote_public_key(&static_key_k.unwrap())?
+        .remote_public_key(&static_key_k.as_ref().unwrap())?
         .build_initiator()?
     } else {
+        println!("Using Noise_XX pattern (new peer)");
         Builder::new(
             "Noise_XX_25519_ChaChaPoly_SHA256"
                 .parse()
@@ -46,7 +48,6 @@ pub fn connect(
         .build_initiator()?
     };
 
-    println!("Using Noise_XX pattern (new peer)");
     let mut message_buffer = vec![0_u8; 65535];
 
     let len = transport_state.write_message(&[], &mut message_buffer)?;
@@ -55,7 +56,7 @@ pub fn connect(
 
     map.lock().expect("mutex poisoned").insert(
         destination,
-        Peer::new(None, Session::Handshaking(transport_state), None),
+        Peer::new(static_key_k, Session::Handshaking(transport_state), None),
     );
 
     for n in 1..6 {
@@ -221,6 +222,20 @@ pub fn handle_incoming_packets(
                 }
                 Session::Handshaking(handshake) => {
                     handle_handshake_message(handshake, recv_buffer, bytes, src, socket_clone)
+                }
+                Session::None => {
+                    let remote_key = peer.public_key.as_ref().map(|k| k.as_ref());
+                    if let Some(handshake) = handle_new_connection(
+                        recv_buffer,
+                        bytes,
+                        src,
+                        socket_clone,
+                        key_pair_clone,
+                        remote_key,
+                    ) {
+                        peer.session = Session::Handshaking(handshake);
+                    }
+                    false
                 }
             };
             if finished {
