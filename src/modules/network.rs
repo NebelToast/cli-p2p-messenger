@@ -10,46 +10,6 @@ use std::{
 use crate::session::Peer;
 
 use super::{error::ConnectErrors, packet::Packet, session::Session};
-pub fn connect_kk(
-    &destination: &SocketAddr,
-    key: &Arc<Mutex<Keypair>>,
-    sock: &UdpSocket,
-    map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
-) -> Result<(), ConnectErrors> {
-    let mut transport_state = Builder::new(
-        "Noise_KK_25519_ChaChaPoly_SHA256"
-            .parse()
-            .expect("Invalid snow pattern"),
-    )
-    .local_private_key(&key.lock().unwrap().private)?
-    .remote_public_key(
-        map.lock()
-            .expect("mutex poisoned")
-            .get(&destination)
-            .unwrap()
-            .public_key
-            .as_ref()
-            .unwrap()
-            .as_ref(),
-    )?
-    .build_initiator()?;
-    let mut message_buffer = vec![0_u8; 65535];
-
-    let len = transport_state.write_message(&[], &mut message_buffer)?;
-
-    sock.send_to(&message_buffer[..len], destination)?;
-
-    for n in 1..6 {
-        thread::sleep(Duration::from_millis(750));
-        println!("Connection is being established {} try", n);
-        if let Some(peer) = map.lock().expect("mutex poisoned").get(&destination) {
-            if let Session::Established(_) = peer.session {
-                return Ok(());
-            }
-        }
-    }
-    Err(ConnectErrors::Timeout)
-}
 
 pub fn connect(
     &destination: &SocketAddr,
@@ -57,21 +17,36 @@ pub fn connect(
     sock: &UdpSocket,
     map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
 ) -> Result<(), ConnectErrors> {
+    let mut static_key = false;
+    let mut static_key_k = None;
     if let Some(peer) = map.lock().expect("mutex poisoned").get(&destination) {
         if let Session::Established(_) = peer.session {
             return Ok(());
         } else if peer.has_static_key() {
-            return connect_kk(&destination, key, sock, map.clone());
+            static_key = true;
+            static_key_k = peer.public_key.clone()
         }
     }
+    let mut transport_state = if static_key {
+        Builder::new(
+            "Noise_KK_25519_ChaChaPoly_SHA256"
+                .parse()
+                .expect("Invalid snow pattern"),
+        )
+        .local_private_key(&key.lock().unwrap().private)?
+        .remote_public_key(&static_key_k.unwrap())?
+        .build_initiator()?
+    } else {
+        Builder::new(
+            "Noise_XX_25519_ChaChaPoly_SHA256"
+                .parse()
+                .expect("Invalid snow pattern"),
+        )
+        .local_private_key(&key.lock().unwrap().private)?
+        .build_initiator()?
+    };
 
-    let mut transport_state = Builder::new(
-        "Noise_XX_25519_ChaChaPoly_SHA256"
-            .parse()
-            .expect("Invalid snow pattern"),
-    )
-    .local_private_key(&key.lock().unwrap().private)?
-    .build_initiator()?;
+    println!("Using Noise_XX pattern (new peer)");
     let mut message_buffer = vec![0_u8; 65535];
 
     let len = transport_state.write_message(&[], &mut message_buffer)?;
@@ -159,6 +134,7 @@ pub fn handle_new_connection(
     } else {
         "Noise_XX_25519_ChaChaPoly_SHA256"
     };
+    println!("Responding with {} pattern", pattern);
 
     let key_guard = key_pair.lock().expect("mutex poisoned");
     let mut builder = Builder::new(pattern.parse().expect("invalid noise pattern"))
