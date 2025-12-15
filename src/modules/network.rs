@@ -1,7 +1,9 @@
 use snow::{Builder, Keypair};
 use std::{
     collections::{HashMap, hash_map::Entry},
+    fs,
     net::{SocketAddr, UdpSocket},
+    path::Path,
     sync::{Arc, Mutex},
     thread,
     time::Duration,
@@ -270,4 +272,26 @@ pub fn handle_incoming_packets(
             }
         }
     }
+}
+
+pub fn load_peers(dir: &Path) -> HashMap<SocketAddr, Peer> {
+    match fs::read(dir.join("peers.json")) {
+        Ok(data) => serde_json::from_slice(&data).unwrap(),
+        Err(_) => HashMap::new(),
+    }
+}
+
+pub fn load_messages(dir: &Path) -> Vec<Packet> {
+    match fs::read(dir.join("messages.json")) {
+        Ok(data) => serde_json::from_slice(&data).unwrap(),
+        Err(_) => vec![],
+    }
+}
+pub fn save_peers(dir: &Path, peer_map: &Arc<Mutex<HashMap<SocketAddr, Peer>>>) {
+    let serialized_peers = serde_json::to_string(&*peer_map.lock().unwrap()).unwrap();
+    std::fs::write(dir.join("peers.json"), serialized_peers).expect("Unable to write file");
+}
+pub fn save_message(dir: &Path, packages: &Arc<Mutex<Vec<Packet>>>) {
+    let serialized_messages = serde_json::to_string(&*packages.lock().unwrap()).unwrap();
+    std::fs::write(dir.join("messages.json"), serialized_messages).expect("Unable to write file");
 }

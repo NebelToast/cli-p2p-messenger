@@ -1,12 +1,12 @@
 use local_ip_address::local_ip;
 use std::{
     collections::HashMap,
-    env, fs,
+    env,
     io::stdin,
     net::{SocketAddr, UdpSocket},
     path::Path,
     sync::{Arc, Mutex},
-    thread, vec,
+    thread,
 };
 
 use networktesting::{crypto::generate_or_load_keypair, network::*, packet::Packet, session::Peer};
@@ -73,10 +73,7 @@ fn client(socket: UdpSocket) {
         let mut input = String::new();
         let mut destination: SocketAddr = "127.0.0.1:500".parse().expect("invalid IP");
         let socket_clone = socket.try_clone().expect("couldn't clone the socket");
-        let loaded_messages: Vec<Packet> = match fs::read("messages.json") {
-            Ok(data) => serde_json::from_slice(&data).unwrap_or_default(),
-            Err(_) => vec![],
-        };
+        let loaded_messages: Vec<Packet> = load_messages(Path::new("."));
         let packages: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(loaded_messages));
         let writer = Arc::clone(&packages);
         let key_pair = Arc::new(Mutex::new(
@@ -84,10 +81,7 @@ fn client(socket: UdpSocket) {
         ));
         let key_pair_clone = Arc::clone(&key_pair);
 
-        let loaded_peers: HashMap<SocketAddr, Peer> = match fs::read("peers.json") {
-            Ok(data) => serde_json::from_slice(&data).unwrap_or_default(),
-            Err(_) => HashMap::new(),
-        };
+        let loaded_peers: HashMap<SocketAddr, Peer> = load_peers(Path::new("."));
         let peer_map = Arc::new(Mutex::new(loaded_peers));
         let peer_map_clone = Arc::clone(&peer_map);
 
@@ -158,16 +152,8 @@ peer_map.lock().unwrap().get(&destination).unwrap().fingerprint());
                         .for_each(|(i, (addr, _))| println!("[{}] {}", i + 1, addr));
                 }
                 "save" => {
-                    let serialized_peers =
-                        serde_json::to_string(&*peer_map.lock().unwrap()).unwrap();
-                    std::fs::write("peers.json", serialized_peers).expect("Unable to write file");
-
-                    let serialized_messages =
-                        serde_json::to_string(&*packages.lock().unwrap()).unwrap();
-                    std::fs::write("messages.json", serialized_messages)
-                        .expect("Unable to write file");
-
-                    println!("Saved peers to peers.json and messages to messages.json");
+                    save_message(Path::new("."), &packages);
+                    save_peers(Path::new("."), &peer_map);
                 }
                 "help" => {
                     println!(
