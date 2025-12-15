@@ -9,10 +9,8 @@ use std::{
     thread, vec,
 };
 
-use networktesting::{
-    crypto::generate_or_load_keypair, network::*, packet::Packet, session::Session,
-};
-fn set_destination(peer_map: &Arc<Mutex<HashMap<SocketAddr, Session>>>) -> Option<SocketAddr> {
+use networktesting::{crypto::generate_or_load_keypair, network::*, packet::Packet, session::Peer};
+fn set_destination(peer_map: &Arc<Mutex<HashMap<SocketAddr, Peer>>>) -> Option<SocketAddr> {
     let contacts: Vec<SocketAddr> = peer_map
         .lock()
         .expect("poisoned mutex")
@@ -81,7 +79,7 @@ fn client(socket: UdpSocket) {
             generate_or_load_keypair(Path::new(".")).expect("couldn't generate keypair"),
         ));
         let key_pair_clone = Arc::clone(&key_pair);
-        let peer_map = Arc::new(Mutex::new(HashMap::<SocketAddr, Session>::new()));
+        let peer_map = Arc::new(Mutex::new(HashMap::<SocketAddr, Peer>::new()));
         let peer_map_clone = Arc::clone(&peer_map);
 
         thread::spawn(move || {
@@ -111,7 +109,7 @@ fn client(socket: UdpSocket) {
                         destination = new_destination;
                         match connect(&destination, &key_pair, &socket, peer_map.clone()) {
                             Ok(_) => println!("connection established"),
-                            Err(_) => println!("couldn't connect"),
+                            Err(e) => println!("{}", e),
                         }
                     }
                     None => println!("coudln't get client ip"),

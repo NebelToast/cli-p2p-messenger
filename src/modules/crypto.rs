@@ -3,9 +3,9 @@ use std::fs;
 
 use super::error::KeyGenerationError;
 
-pub const PATTERN: &str = "Noise_XX_25519_ChaChaPoly_SHA256";
-
 use std::path::Path;
+
+const PATTERN: &str = "Noise_XX_25519_ChaChaPoly_SHA256";
 
 pub fn generate_or_load_keypair(dir: &Path) -> Result<Keypair, KeyGenerationError> {
     let private_key_path = dir.join("private.key");
