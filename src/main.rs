@@ -110,18 +110,26 @@ fn client(socket: UdpSocket) {
                 "connect" => match set_destination(&peer_map) {
                     Some(new_destination) => {
                         destination = new_destination;
+                        let was_known = peer_map
+                            .lock()
+                            .unwrap()
+                            .get(&destination)
+                            .map(|p| p.has_static_key())
+                            .unwrap_or(false);
                         match connect(&destination, &key_pair, &socket, peer_map.clone()) {
                             Ok(_) => {
-                                println!(
+                                if !was_known {
+                                    println!(
                                     "Peer is unknown. Do you want to connect to Peer with Fingerprint: {}
 [y] yes
 [n] no",
 peer_map.lock().unwrap().get(&destination).unwrap().fingerprint());
-                                input.clear();
-                                stdin().read_line(&mut input).expect("Failed to read line");
-                                if input.trim().to_lowercase() == "y" {
-                                } else {
-                                    peer_map.lock().unwrap().remove(&destination);
+                                    input.clear();
+                                    stdin().read_line(&mut input).expect("Failed to read line");
+                                    if input.trim().to_lowercase() == "y" {
+                                    } else {
+                                        peer_map.lock().unwrap().remove(&destination);
+                                    }
                                 }
                             }
 
