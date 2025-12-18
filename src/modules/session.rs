@@ -25,14 +25,14 @@ impl std::fmt::Debug for Session {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Peer {
-    pub public_key: Option<Box<[u8]>>,
+    pub public_key: Option<[u8; 32]>,
     #[serde(skip, default)]
     pub session: Session,
     pub username: Option<String>,
 }
 
 impl Peer {
-    pub fn new(public_key: Option<Box<[u8]>>, session: Session, username: Option<String>) -> Self {
+    pub fn new(public_key: Option<[u8; 32]>, session: Session, username: Option<String>) -> Self {
         Self {
             public_key: public_key,
             session: session,
@@ -43,7 +43,7 @@ impl Peer {
         self.public_key.is_some()
     }
     pub fn fingerprint(&self) -> String {
-        let public_key_bytes = self.public_key.as_ref().unwrap();
+        let public_key_bytes = self.public_key.unwrap();
 
         let actual_digest = digest::digest(&digest::SHA256, &public_key_bytes);
 

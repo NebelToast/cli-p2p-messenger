@@ -121,13 +121,12 @@ fn client(socket: UdpSocket) {
                                 if !was_known {
                                     println!(
                                     "Peer is unknown. Do you want to connect to Peer with Fingerprint: {}
-[y] yes
-[n] no",
+[y] connect
+[any] do not connect",
 peer_map.lock().unwrap().get(&destination).unwrap().fingerprint());
                                     input.clear();
                                     stdin().read_line(&mut input).expect("Failed to read line");
-                                    if input.trim().to_lowercase() == "y" {
-                                    } else {
+                                    if input.trim().to_lowercase() != "y" {
                                         peer_map.lock().unwrap().remove(&destination);
                                     }
                                 }

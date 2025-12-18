@@ -477,7 +477,7 @@ fn test_peer_has_static_key() {
     let (_, transport2) = complete_handshake();
 
     let peer_with_key = Peer::new(
-        Some(keypair.public.into_boxed_slice()),
+        Some(keypair.public.try_into().expect("invalid key length")),
         Session::Established(transport2),
         None,
     );
@@ -570,11 +570,7 @@ fn test_save_peers() {
     let peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>> = Arc::new(Mutex::new(HashMap::new()));
     let addr: SocketAddr = "127.0.0.1:9090".parse().unwrap();
 
-    let peer = Peer::new(
-        Some(Box::new([10; 32])),
-        Session::None,
-        Some("test_user".to_string()),
-    );
+    let peer = Peer::new(Some([10; 32]), Session::None, Some("test_user".to_string()));
     peer_map.lock().unwrap().insert(addr, peer);
 
     let dir = tempdir().unwrap();
@@ -626,11 +622,15 @@ fn test_session_debug_established() {
 fn test_peer_fingerprint_consistent() {
     let public_key = vec![1u8; 32];
     let peer1 = Peer::new(
-        Some(public_key.clone().into_boxed_slice()),
+        Some(public_key.clone().try_into().expect("invalid key length")),
         Session::None,
         None,
     );
-    let peer2 = Peer::new(Some(public_key.into_boxed_slice()), Session::None, None);
+    let peer2 = Peer::new(
+        Some(public_key.try_into().expect("invalid key length")),
+        Session::None,
+        None,
+    );
 
     assert_eq!(peer1.fingerprint(), peer2.fingerprint());
 }
@@ -648,7 +648,13 @@ fn test_handle_incoming_packets_with_session_none() {
     peer_map.lock().unwrap().insert(
         src,
         Peer::new(
-            Some(initiator_keypair.public.clone().into_boxed_slice()),
+            Some(
+                initiator_keypair
+                    .public
+                    .clone()
+                    .try_into()
+                    .expect("invalid key length"),
+            ),
             Session::None,
             Some("loaded_peer".to_string()),
         ),
@@ -698,7 +704,8 @@ fn test_connect_with_kk_pattern_known_peer() {
                     .unwrap()
                     .public
                     .clone()
-                    .into_boxed_slice(),
+                    .try_into()
+                    .expect("invalid key length"),
             ),
             Session::None,
             None,
@@ -714,7 +721,8 @@ fn test_connect_with_kk_pattern_known_peer() {
                     .unwrap()
                     .public
                     .clone()
-                    .into_boxed_slice(),
+                    .try_into()
+                    .expect("invalid key length"),
             ),
             Session::None,
             None,

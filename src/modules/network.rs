@@ -20,7 +20,7 @@ pub fn connect(
     map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
 ) -> Result<(), ConnectErrors> {
     let mut static_key = false;
-    let mut static_key_k = None;
+    let mut static_key_k: Option<[u8; 32]> = None;
     if let Some(peer) = map.lock().expect("mutex poisoned").get(&destination) {
         if let Session::Established(_) = peer.session {
             return Ok(());
@@ -37,7 +37,7 @@ pub fn connect(
                 .expect("Invalid snow pattern"),
         )
         .local_private_key(&key.lock().unwrap().private)?
-        .remote_public_key(&static_key_k.as_ref().unwrap())?
+        .remote_public_key(static_key_k.as_ref().unwrap())?
         .build_initiator()?
     } else {
         println!("Using Noise_XX pattern (new peer)");
@@ -226,7 +226,7 @@ pub fn handle_incoming_packets(
                     handle_handshake_message(handshake, recv_buffer, bytes, src, socket_clone)
                 }
                 Session::None => {
-                    let remote_key = peer.public_key.as_ref().map(|k| k.as_ref());
+                    let remote_key = peer.public_key.as_ref().map(|k| k.as_slice());
                     if let Some(handshake) = handle_new_connection(
                         recv_buffer,
                         bytes,
@@ -260,7 +260,9 @@ pub fn handle_incoming_packets(
             match handshake.into_transport_mode() {
                 Ok(transport) => {
                     if peer.public_key.is_none() {
-                        peer.public_key = transport.get_remote_static().map(|k| k.into());
+                        peer.public_key = transport
+                            .get_remote_static()
+                            .map(|k| k.try_into().expect("invalid key length"));
                     }
                     peer.session = Session::Established(transport);
                     peers.insert(src, peer);
