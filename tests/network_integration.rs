@@ -67,7 +67,7 @@ fn test_handle_established_session_stores_decrypted_packet() {
     let mut buf = [0u8; 65535];
     let len = sender.write_message(b"Hello!", &mut buf).unwrap();
 
-    handle_established_session(&mut receiver, &buf, len, src, &packets);
+    handle_established_session(&mut receiver, &buf, len, src, &packets, true);
 
     let stored = packets.lock().unwrap();
     assert_eq!(stored.len(), 1);
@@ -278,6 +278,7 @@ fn test_decrypted_message_stored() {
         .lock()
         .unwrap()
         .insert(src, Peer::new(None, Session::Established(receiver), None));
+    peer_map.lock().unwrap().get_mut(&src).unwrap().trusted = true;
 
     let mut buf = [0u8; 65535];
     let len = sender.write_message(b"Established", &mut buf).unwrap();
