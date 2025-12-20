@@ -162,6 +162,13 @@ peer_map.lock().unwrap().get(&destination).unwrap().fingerprint());
                     save_message(Path::new("."), &packages);
                     save_peers(Path::new("."), &peer_map);
                 }
+                "fingerprint" => {
+                    let public_key_bytes = &key_pair.lock().expect("poisoned mutex").public;
+
+                    let actual_digest = digest::digest(&digest::SHA256, &public_key_bytes);
+
+                    println!("{}", hex::encode(actual_digest.as_ref()));
+                }
                 "help" => {
                     println!(
                         "\nconnect: Connect to new or known peer.
