@@ -1,4 +1,5 @@
 use local_ip_address::local_ip;
+use ring::digest;
 use std::{
     collections::HashMap,
     env,
@@ -21,8 +22,8 @@ fn set_destination(peer_map: &Arc<Mutex<HashMap<SocketAddr, Peer>>>) -> Option<S
     if !contacts.is_empty() {
         println!(
             "Do you want to connect to a known client?
-        [Y]: yes
-        [N]: no"
+[Y]: yes
+[N]: no"
         );
         stdin().read_line(&mut input).unwrap();
     } else {
@@ -84,7 +85,6 @@ fn client(socket: UdpSocket) {
         let loaded_peers: HashMap<SocketAddr, Peer> = load_peers(Path::new("."));
         let peer_map = Arc::new(Mutex::new(loaded_peers));
         let peer_map_clone = Arc::clone(&peer_map);
-
         thread::spawn(move || {
             let mut recv_buffer = [0_u8; 65535];
             loop {
@@ -126,7 +126,14 @@ fn client(socket: UdpSocket) {
 peer_map.lock().unwrap().get(&destination).unwrap().fingerprint());
                                     input.clear();
                                     stdin().read_line(&mut input).expect("Failed to read line");
-                                    if input.trim().to_lowercase() != "y" {
+                                    if input.trim().to_lowercase() == "y" {
+                                        peer_map
+                                            .lock()
+                                            .unwrap()
+                                            .get_mut(&destination)
+                                            .unwrap()
+                                            .trusted = true;
+                                    } else {
                                         peer_map.lock().unwrap().remove(&destination);
                                     }
                                 }
@@ -169,6 +176,41 @@ peer_map.lock().unwrap().get(&destination).unwrap().fingerprint());
 
                     println!("{}", hex::encode(actual_digest.as_ref()));
                 }
+                "approve" => {
+                    let mut peer_map = peer_map.lock().expect("poisoned mutex");
+
+                    let untrusted: Vec<SocketAddr> = peer_map
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, (addr, peer))| {
+                            if !peer.trusted {
+                                println!("[{}] {} fingerprint {}", i + 1, addr, peer.fingerprint());
+                                return Some(*addr);
+                            }
+                            None
+                        })
+                        .collect();
+                    if untrusted.is_empty() {
+                        println!("No pending approvals");
+                        continue;
+                    }
+                    input.clear();
+                    stdin().read_line(&mut input).unwrap();
+
+                    if let Ok(number) = input.trim().parse::<usize>() {
+                        if number > 0 && number <= untrusted.len() {
+                            let target_addr = untrusted[number - 1];
+                            if let Some(peer) = peer_map.get_mut(&target_addr) {
+                                peer.trusted = true;
+                                println!("approved {}", peer.fingerprint());
+                            }
+                        } else {
+                            println!("Invalid selection");
+                        }
+                    } else {
+                        println!("Invalid input");
+                    };
+                }
                 "help" => {
                     println!(
                         "\nconnect: Connect to new or known peer.
@@ -177,6 +219,7 @@ ip: Display your current IP address and port.
 contacts: List known peers.
 help: Display help for commands.
 save: Saves the connections to a file
+fingerprint: Display own public key fingerprint
 <text>: Send message to current destination"
                     );
                 }

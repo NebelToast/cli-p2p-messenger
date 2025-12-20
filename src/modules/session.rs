@@ -29,6 +29,7 @@ pub struct Peer {
     #[serde(skip, default)]
     pub session: Session,
     pub username: Option<String>,
+    pub trusted: bool,
 }
 
 impl Peer {
@@ -37,6 +38,7 @@ impl Peer {
             public_key: public_key,
             session: session,
             username: username,
+            trusted: false,
         }
     }
     pub fn has_static_key(&self) -> bool {

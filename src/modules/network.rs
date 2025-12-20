@@ -79,7 +79,9 @@ pub fn handle_established_session(
     bytes: usize,
     src: SocketAddr,
     writer: &Arc<Mutex<Vec<Packet>>>,
+    trusted: bool,
 ) {
+
     let mut message_buffer = [0_u8; 65535];
     let len = match transport.read_message(&recv_buffer[..bytes], &mut message_buffer) {
         Ok(len) => len,
@@ -88,12 +90,13 @@ pub fn handle_established_session(
             return;
         }
     };
-
-    let packet = Packet::new(src, len, message_buffer[..len].to_vec().into_boxed_slice());
-    if let Err(e) = packet.print_message() {
-        print!("{}", e);
+    if trusted {
+        let packet = Packet::new(src, len, message_buffer[..len].to_vec().into_boxed_slice());
+        if let Err(e) = packet.print_message() {
+            print!("{}", e);
+        }
+        writer.lock().expect("mutex poisoned").push(packet);
     }
-    writer.lock().expect("mutex poisoned").push(packet);
 }
 
 pub fn handle_handshake_message(
@@ -219,7 +222,14 @@ pub fn handle_incoming_packets(
             let peer = entry.get_mut();
             let finished = match &mut peer.session {
                 Session::Established(transport) => {
-                    handle_established_session(transport, recv_buffer, bytes, src, &writer);
+                    handle_established_session(
+                        transport,
+                        recv_buffer,
+                        bytes,
+                        src,
+                        &writer,
+                        peer.trusted,
+                    );
                     false
                 }
                 Session::Handshaking(handshake) => {
@@ -265,6 +275,7 @@ pub fn handle_incoming_packets(
                             .map(|k| k.try_into().expect("invalid key length"));
                     }
                     peer.session = Session::Established(transport);
+                    println!("New peer wants to connect");
                     peers.insert(src, peer);
                 }
                 Err(_) => {
