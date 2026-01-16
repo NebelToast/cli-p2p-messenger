@@ -162,8 +162,7 @@ peer_map.lock().unwrap().get(&destination).unwrap().fingerprint());
                         .lock()
                         .unwrap()
                         .iter()
-                        .enumerate()
-                        .for_each(|(i, (addr, _))| println!("[{}] {}", i + 1, addr));
+                        .for_each(|addr| println!("{}", addr.0));
                 }
                 "save" => {
                     save_message(Path::new("."), &packages);
