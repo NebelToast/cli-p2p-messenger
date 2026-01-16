@@ -81,7 +81,6 @@ pub fn handle_established_session(
     writer: &Arc<Mutex<Vec<Packet>>>,
     trusted: bool,
 ) {
-
     let mut message_buffer = [0_u8; 65535];
     let len = match transport.read_message(&recv_buffer[..bytes], &mut message_buffer) {
         Ok(len) => len,
@@ -245,9 +244,16 @@ pub fn handle_incoming_packets(
                         key_pair_clone,
                         remote_key,
                     ) {
-                        peer.session = Session::Handshaking(handshake);
+                        if handshake.is_handshake_finished() {
+                            peer.session = Session::Handshaking(handshake);
+                            true
+                        } else {
+                            peer.session = Session::Handshaking(handshake);
+                            false
+                        }
+                    } else {
+                        false
                     }
-                    false
                 }
             };
             if finished {
