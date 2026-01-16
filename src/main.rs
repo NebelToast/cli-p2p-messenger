@@ -217,6 +217,7 @@ contacts: List known peers.
 help: Display help for commands.
 save: Saves the connections to a file
 fingerprint: Display own public key fingerprint
+approve: approve clients that want to connect
 <text>: Send message to current destination"
                     );
                 }
