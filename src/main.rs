@@ -41,10 +41,7 @@ fn set_destination(peer_map: &Arc<Mutex<HashMap<SocketAddr, Peer>>>) -> Option<S
             }
         }
         "y" => {
-            contacts
-                .iter()
-                .enumerate()
-                .for_each(|(i, key)| println!("[{}] {}", i + 1, key));
+            contacts.iter().for_each(|key| println!(" {}", key));
             input.clear();
             stdin().read_line(&mut input).unwrap();
 
