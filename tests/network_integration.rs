@@ -676,7 +676,9 @@ fn test_handle_incoming_packets_with_session_none() {
 
     let peers = peer_map.lock().unwrap();
     let peer = peers.get(&src).unwrap();
-    assert!(matches!(peer.session, Session::Handshaking(_)));
+    // KK pattern completes in 2 messages, so after receiving the first message
+    // and sending the response, the responder's handshake is finished
+    assert!(matches!(peer.session, Session::Established(_)));
 }
 
 #[test]
@@ -782,4 +784,159 @@ fn test_connect_with_kk_pattern_known_peer() {
     );
 
     assert!(result.is_ok());
+}
+
+#[test]
+fn test_session_saved_and_continued() {
+    let initiator_keypair = Arc::new(Mutex::new(create_keypair()));
+    let responder_keypair = Arc::new(Mutex::new(create_keypair()));
+
+    let peer_map_initiator: Arc<Mutex<HashMap<SocketAddr, Peer>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+    let peer_map_responder: Arc<Mutex<HashMap<SocketAddr, Peer>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+    let responder_packets: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(vec![]));
+
+    let socket_initiator = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let socket_responder = UdpSocket::bind("127.0.0.1:0").unwrap();
+
+    let destination_initiator: SocketAddr = socket_responder.local_addr().unwrap();
+    let initiator_addr: SocketAddr = socket_initiator.local_addr().unwrap();
+
+    let peer_map_responder_cl = Arc::clone(&peer_map_responder);
+    let responder_k = Arc::clone(&responder_keypair);
+    let socket_responder_clone = socket_responder.try_clone().unwrap();
+    let responder_packets_cl = Arc::clone(&responder_packets);
+    let _responder_handle = thread::spawn(move || {
+        loop {
+            let mut recv_buffer = [0_u8; 65535];
+            match socket_responder_clone.recv_from(&mut recv_buffer) {
+                Ok((bytes, src)) => {
+                    handle_incoming_packets(
+                        &recv_buffer,
+                        bytes,
+                        src,
+                        &socket_responder_clone,
+                        &responder_k,
+                        &peer_map_responder_cl,
+                        &responder_packets_cl,
+                    );
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    let peer_map_initiator_cl = Arc::clone(&peer_map_initiator);
+    let initiator_k = Arc::clone(&initiator_keypair);
+    let socket_initiator_clone = socket_initiator.try_clone().unwrap();
+    let _initiator_handle = thread::spawn(move || {
+        let packets: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(vec![]));
+        loop {
+            let mut recv_buffer = [0_u8; 65535];
+            match socket_initiator_clone.recv_from(&mut recv_buffer) {
+                Ok((bytes, src)) => {
+                    handle_incoming_packets(
+                        &recv_buffer,
+                        bytes,
+                        src,
+                        &socket_initiator_clone,
+                        &initiator_k,
+                        &peer_map_initiator_cl,
+                        &packets,
+                    );
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    let result = connect(
+        &destination_initiator,
+        &initiator_keypair,
+        &socket_initiator,
+        Arc::clone(&peer_map_initiator),
+    );
+    assert!(result.is_ok());
+
+    {
+        let peers = peer_map_initiator.lock().unwrap();
+        let peer = peers.get(&destination_initiator).unwrap();
+        assert!(matches!(peer.session, Session::Established(_)));
+        assert!(peer.public_key.is_some());
+    }
+
+    let dir = tempdir().unwrap();
+    save_peers(dir.path(), &peer_map_initiator);
+
+    let loaded_peers = load_peers(dir.path());
+
+    let loaded_peer = loaded_peers.get(&destination_initiator).unwrap();
+    assert!(matches!(loaded_peer.session, Session::None),);
+    assert!(loaded_peer.public_key.is_some());
+
+    {
+        let mut peers = peer_map_initiator.lock().unwrap();
+        peers.clear();
+        for (addr, peer) in loaded_peers {
+            peers.insert(addr, peer);
+        }
+    }
+
+    {
+        let mut peers = peer_map_responder.lock().unwrap();
+        if let Some(peer) = peers.get_mut(&initiator_addr) {
+            let public_key = peer.public_key.clone();
+            let username = peer.username.clone();
+            *peer = Peer::new(public_key, Session::None, username);
+        }
+    }
+
+    let reconnect_result = connect(
+        &destination_initiator,
+        &initiator_keypair,
+        &socket_initiator,
+        Arc::clone(&peer_map_initiator),
+    );
+    assert!(reconnect_result.is_ok());
+
+    {
+        let peers = peer_map_initiator.lock().unwrap();
+        let peer = peers.get(&destination_initiator).unwrap();
+        assert!(matches!(peer.session, Session::Established(_)));
+    }
+
+    thread::sleep(Duration::from_millis(100));
+
+    {
+        let peers = peer_map_responder.lock().unwrap();
+        let peer = peers.get(&initiator_addr).unwrap();
+        assert!(matches!(peer.session, Session::Established(_)));
+    }
+
+    {
+        let mut peers = peer_map_responder.lock().unwrap();
+        if let Some(peer) = peers.get_mut(&initiator_addr) {
+            peer.trusted = true;
+        }
+    }
+
+    send_message(
+        &peer_map_initiator,
+        &destination_initiator,
+        "Hello",
+        &socket_initiator,
+    );
+
+    thread::sleep(Duration::from_millis(100));
+
+    {
+        let packets = responder_packets.lock().unwrap();
+        assert!(
+            !packets.is_empty(),
+            "Responder should have received the message"
+        );
+        let received_msg = std::str::from_utf8(&packets[0].payload[..packets[0].bytes]).unwrap();
+        assert_eq!(received_msg, "Hello");
+    }
 }
