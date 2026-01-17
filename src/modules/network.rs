@@ -286,7 +286,7 @@ pub fn handle_incoming_packets(
                             .map(|k| k.try_into().expect("invalid key length"));
                     }
                     peer.session = Session::Established(transport);
-                    println!("New peer wants toefsfewef connect");
+                    println!("New peer wants to connect");
                     peers.insert(src, peer);
                 }
                 Err(_) => {
