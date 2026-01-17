@@ -676,8 +676,6 @@ fn test_handle_incoming_packets_with_session_none() {
 
     let peers = peer_map.lock().unwrap();
     let peer = peers.get(&src).unwrap();
-    // KK pattern completes in 2 messages, so after receiving the first message
-    // and sending the response, the responder's handshake is finished
     assert!(matches!(peer.session, Session::Established(_)));
 }
 

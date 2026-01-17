@@ -58,7 +58,12 @@ pub fn connect(
 
     map.lock().expect("mutex poisoned").insert(
         destination,
-        Peer::new(static_key_k, Session::Handshaking(transport_state), None),
+        Peer::new_trusted(
+            static_key_k,
+            Session::Handshaking(transport_state),
+            None,
+            static_key,
+        ),
     );
 
     for n in 1..6 {
@@ -281,7 +286,7 @@ pub fn handle_incoming_packets(
                             .map(|k| k.try_into().expect("invalid key length"));
                     }
                     peer.session = Session::Established(transport);
-                    println!("New peer wants to connect");
+                    println!("New peer wants toefsfewef connect");
                     peers.insert(src, peer);
                 }
                 Err(_) => {

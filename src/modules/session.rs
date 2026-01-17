@@ -41,6 +41,19 @@ impl Peer {
             trusted: false,
         }
     }
+    pub fn new_trusted(
+        public_key: Option<[u8; 32]>,
+        session: Session,
+        username: Option<String>,
+        trusted: bool,
+    ) -> Self {
+        Self {
+            public_key: public_key,
+            session: session,
+            username: username,
+            trusted: trusted,
+        }
+    }
     pub fn has_static_key(&self) -> bool {
         self.public_key.is_some()
     }
