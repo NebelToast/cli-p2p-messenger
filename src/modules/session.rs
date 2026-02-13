@@ -65,3 +65,93 @@ impl Peer {
         hex::encode(actual_digest.as_ref())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use snow::Builder;
+
+    const PATTERN_XX: &str = "Noise_XX_25519_ChaChaPoly_SHA256";
+
+    fn create_keypair() -> snow::Keypair {
+        Builder::new(PATTERN_XX.parse().unwrap())
+            .generate_keypair()
+            .unwrap()
+    }
+
+    fn complete_handshake_xx() -> (snow::TransportState, snow::TransportState) {
+        let mut initiator = Builder::new(PATTERN_XX.parse().unwrap())
+            .local_private_key(&create_keypair().private)
+            .unwrap()
+            .build_initiator()
+            .unwrap();
+        let mut responder = Builder::new(PATTERN_XX.parse().unwrap())
+            .local_private_key(&create_keypair().private)
+            .unwrap()
+            .build_responder()
+            .unwrap();
+
+        let mut buf = [0u8; 65535];
+        let mut tmp = [0u8; 65535];
+
+        let len = initiator.write_message(&[], &mut buf).unwrap();
+        responder.read_message(&buf[..len], &mut tmp).unwrap();
+        let len = responder.write_message(&[], &mut buf).unwrap();
+        initiator.read_message(&buf[..len], &mut tmp).unwrap();
+        let len = initiator.write_message(&[], &mut buf).unwrap();
+        responder.read_message(&buf[..len], &mut tmp).unwrap();
+
+        (
+            initiator.into_transport_mode().unwrap(),
+            responder.into_transport_mode().unwrap(),
+        )
+    }
+
+    #[test]
+    fn test_peer_has_static_key() {
+        let keypair = create_keypair();
+        let (_, transport) = complete_handshake_xx();
+
+        let peer_without_key = Peer::new(None, Session::Established(transport), None);
+        assert!(!peer_without_key.has_static_key());
+
+        let (_, transport2) = complete_handshake_xx();
+
+        let peer_with_key = Peer::new(
+            Some(keypair.public.try_into().expect("invalid key length")),
+            Session::Established(transport2),
+            None,
+        );
+        assert!(peer_with_key.has_static_key());
+    }
+
+    #[test]
+    fn test_session_debug_handshaking() {
+        let keypair = create_keypair();
+        let handshake = Builder::new(PATTERN_XX.parse().unwrap())
+            .local_private_key(&keypair.private)
+            .unwrap()
+            .build_initiator()
+            .unwrap();
+        let session = Session::Handshaking(handshake);
+        let debug_str = format!("{:?}", session);
+        assert_eq!(debug_str, "Session::Handshaking");
+    }
+
+    #[test]
+    fn test_session_debug_established() {
+        let (transport, _) = complete_handshake_xx();
+        let session = Session::Established(transport);
+        let debug_str = format!("{:?}", session);
+        assert_eq!(debug_str, "Session::Established");
+    }
+
+    #[test]
+    fn test_peer_fingerprint_consistent() {
+        let public_key = [1u8; 32];
+        let peer1 = Peer::new(Some(public_key), Session::None, None);
+        let peer2 = Peer::new(Some(public_key), Session::None, None);
+
+        assert_eq!(peer1.fingerprint(), peer2.fingerprint());
+    }
+}
