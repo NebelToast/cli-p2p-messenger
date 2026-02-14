@@ -251,10 +251,15 @@ fn client(socket: UdpSocket) {
                         println!("Invalid input");
                     };
                 }
+                "clear" => {
+                    delete_contacts(Path::new("."));
+                    peer_map.lock().unwrap().clear();
+                }
                 "help" => {
                     println!(
                         "\nconnect: Connect to new or known peer.
 messages: Print the history of received messages.
+clear: delete contacts including file
 ip: Display your current IP address and port.
 contacts: List known peers.
 help: Display help for commands.

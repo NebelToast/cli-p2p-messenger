@@ -336,6 +336,9 @@ pub fn save_message(dir: &Path, packages: &Arc<Mutex<Vec<Packet>>>) {
     let serialized_messages = serde_json::to_string(&*packages.lock().unwrap()).unwrap();
     std::fs::write(dir.join("messages.json"), serialized_messages).expect("Unable to write file");
 }
+pub fn delete_contacts(dir: &Path) {
+    std::fs::remove_file(dir.join("peers.json")).expect("Unable to delete contacts");
+}
 
 #[cfg(test)]
 mod tests {
