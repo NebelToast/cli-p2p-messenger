@@ -21,18 +21,20 @@ pub fn connect(
     map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
 ) -> Result<(), ConnectErrors> {
     if let Some(peer) = map.lock().expect("mutex poisoned").get(&destination)
-        && matches!(peer.session, Session::Established(_)) {
-            println!("Session already established with {}", destination);
-            return Ok(());
-        }
+        && matches!(peer.session, Session::Established(_))
+    {
+        println!("Session already established with {}", destination);
+        return Ok(());
+    }
 
     let mut static_key = false;
     let mut static_key_k: Option<[u8; 32]> = None;
     if let Some(peer) = map.lock().expect("mutex poisoned").get(&destination)
-        && peer.has_static_key() {
-            static_key = true;
-            static_key_k = peer.public_key
-        }
+        && peer.has_static_key()
+    {
+        static_key = true;
+        static_key_k = peer.public_key
+    }
     let mut transport_state = if static_key {
         println!("Using Noise_KK pattern (known peer)");
         Builder::new(
