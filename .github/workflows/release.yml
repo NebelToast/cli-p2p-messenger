@@ -7,8 +7,15 @@ on:
 
 jobs:
   release:
-    name: Release
+    name: Release for ${{ matrix.target }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-linux-gnu
+            asset_name: cli-p2p-messenger-linux-x86_64
+          - target: aarch64-linux-gnu
+            asset_name: cli-p2p-messenger-linux-arm64
     permissions:
       contents: write
     steps:
@@ -19,9 +26,25 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Cross-Compilation Tools
+        if: matrix.target == 'aarch64-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Build
-        run: cargo build --release --locked
+        run: |
+          if [ "${{ matrix.target }}" == "aarch64-linux-gnu" ]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          fi
+          cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Prepare Release Asset
+        run: |
+          tar -czf ${{ matrix.asset_name }}.tar.gz -C target/${{ matrix.target }}/release cli-p2p-messenger
 
       - name: Generate Changelog
         uses: orhun/git-cliff-action@v4
@@ -32,12 +55,9 @@ jobs:
         env:
           OUTPUT: CHANGELOG.md
 
-      - name: Prepare Release Asset
-        run: tar -czf cli-p2p-messenger-linux-x86_64.tar.gz -C target/release cli-p2p-messenger
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
           body: ${{ steps.git-cliff.outputs.content }}
           files: |
-            cli-p2p-messenger-linux-x86_64.tar.gz
-            CHANGELOG.md
+            ${{ matrix.asset_name }}.tar.gz
