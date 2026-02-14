@@ -126,7 +126,7 @@ dependencies = [
 
 [[package]]
 name = "cli-p2p-messenger"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "hex",
  "local-ip-address",
