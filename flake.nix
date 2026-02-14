@@ -22,6 +22,7 @@
         pkgs.rust-analyzer-unwrapped
         pkgs.cargo-nextest
         pkgs.cargo-llvm-cov
+        pkgs.git-cliff
       ];
 
 
