@@ -5,11 +5,11 @@ A secure, peer-to-peer command-line messenger written in Rust. This tool establi
 
 ## Features
 
-- **End-to-End Encryption:** Uses the `Noise_XX_25519_ChaChaPoly_SHA256` pattern via the [snow](https://crates.io/crates/snow) crate to ensure secure handshakes and transport.
-- **Peer-to-Peer (P2P):** No central server required; communicates directly via UDP.
+- **End-to-End Encryption:** Uses the `Noise_XX_25519_ChaChaPoly_SHA256` and `Noise_KK_25519_ChaChaPoly_SHA256` pattern via the [snow](https://crates.io/crates/snow) crate.
+- **Peer-to-Peer (P2P):** No central server; communicates directly via UDP.
 - **Key Management:** Automatically generates and loads persistent `private.key` and `public.key` pairs.
-- **Session Management:** Handles secure handshakes and maintains established transport sessions.
-- **CLI Interface:** Simple command-line interface to connect, manage contacts, and send messages.
+- **Session Management:** Handles Noise handshakes and maintains established transport sessions.
+- **CLI Interface:** Command-line interface to connect, manage contacts, and send messages.
 
 ## Tech Stack
 
@@ -59,6 +59,12 @@ IP (with port)?:
 **ip** Display your current IP address and port.
 
 **contacs** List known peers.
+
+**save** Saves the connections to a file
+
+**fingerprint** Display own public key fingerprint
+
+**approve** approve clients that want to connect
 
 **help** Display help for commands
 
