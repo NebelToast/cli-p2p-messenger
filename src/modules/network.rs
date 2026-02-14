@@ -225,12 +225,9 @@ pub fn handle_incoming_packets(
         return;
     };
 
-    peers.entry(src).or_insert_with(|| Peer::new(None));
-
-    let peer = peers.get_mut(&src).expect("peer should exist");
-
     match flag {
         SessionFlag::Handshake => {
+            let peer = peers.entry(src).or_insert_with(|| Peer::new(None));
             let remote_key = peer.public_key.as_ref().map(|k| k.as_slice());
             if let Some(handshake) = handle_new_connection(
                 payload,
@@ -263,6 +260,10 @@ pub fn handle_incoming_packets(
             }
         }
         SessionFlag::HandshakeResponse => {
+            let Some(peer) = peers.get_mut(&src) else {
+                println!("Received handshake response from unknown peer {}", src);
+                return;
+            };
             let session = std::mem::take(&mut peer.session);
             if let Session::Handshaking(mut handshake) = session {
                 let finished = handle_handshake_message(
@@ -304,6 +305,9 @@ pub fn handle_incoming_packets(
             peers.remove(&src);
         }
         SessionFlag::Transport => {
+            let Some(peer) = peers.get_mut(&src) else {
+                return;
+            };
             if peer.trusted {
                 let packet = Packet::new(src, payload.len(), payload.to_vec().into_boxed_slice());
                 if let Err(e) = packet.print_message() {
@@ -337,7 +341,7 @@ pub fn save_message(dir: &Path, packages: &Arc<Mutex<Vec<Packet>>>) {
     std::fs::write(dir.join("messages.json"), serialized_messages).expect("Unable to write file");
 }
 pub fn delete_contacts(dir: &Path) {
-    std::fs::remove_file(dir.join("peers.json")).expect("Unable to delete contacts");
+    let _ = std::fs::remove_file(dir.join("peers.json"));
 }
 
 #[cfg(test)]
