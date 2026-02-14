@@ -119,23 +119,65 @@ fn client(socket: UdpSocket) {
                         match connect(&destination, &key_pair, &socket, peer_map.clone()) {
                             Ok(_) => {
                                 if !was_known {
+                                    println!("Waiting for handshake to complete...");
+                                    let mut attempts = 0;
+                                    loop {
+                                        thread::sleep(std::time::Duration::from_millis(100));
+                                        attempts += 1;
+                                        let has_key = peer_map
+                                            .lock()
+                                            .unwrap()
+                                            .get(&destination)
+                                            .map(|p| p.has_static_key())
+                                            .unwrap_or(false);
+                                        if has_key || attempts > 50 {
+                                            break;
+                                        }
+                                    }
+
+                                    let fingerprint = peer_map
+                                        .lock()
+                                        .unwrap()
+                                        .get(&destination)
+                                        .map(|peer| peer.fingerprint())
+                                        .unwrap_or_else(|| "<unknown>".to_string());
+
+                                    if fingerprint == "<unknown>" {
+                                        println!("Handshake timed out.");
+                                        peer_map.lock().unwrap().remove(&destination);
+                                    } else {
+                                        println!(
+                                            "Do you want to connect to Peer with Fingerprint: {}\n\
+                                            [y] connect\n\
+                                            [any] do not connect",
+                                            fingerprint
+                                        );
+                                        input.clear();
+                                        stdin().read_line(&mut input).expect("Failed to read line");
+                                        if input.trim().to_lowercase() == "y" {
+                                            peer_map
+                                                .lock()
+                                                .unwrap()
+                                                .get_mut(&destination)
+                                                .unwrap()
+                                                .trusted = true;
+                                            println!("Peer approved and saved to contacts.");
+                                        } else {
+                                            send_reject(&socket, &destination);
+                                            peer_map.lock().unwrap().remove(&destination);
+                                            println!("Connection rejected.");
+                                        }
+                                    }
+                                } else {
                                     println!(
-                                    "Peer is unknown. Do you want to connect to Peer with Fingerprint: {}
-[y] connect
-[any] do not connect",
-peer_map.lock().unwrap().get(&destination).unwrap().fingerprint());
-                                    input.clear();
-                                    stdin().read_line(&mut input).expect("Failed to read line");
-                                    if input.trim().to_lowercase() == "y" {
+                                        "Connected to known peer (fingerprint: {})",
                                         peer_map
                                             .lock()
                                             .unwrap()
-                                            .get_mut(&destination)
-                                            .unwrap()
-                                            .trusted = true;
-                                    } else {
-                                        peer_map.lock().unwrap().remove(&destination);
-                                    }
+                                            .get(&destination)
+                                            .map(|p| p.fingerprint())
+                                            .unwrap_or_else(|| "<unknown>".to_string())
+                                    );
                                 }
                             }
 

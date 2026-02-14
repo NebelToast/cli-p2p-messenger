@@ -26,39 +26,33 @@ impl std::fmt::Debug for Session {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Peer {
     pub public_key: Option<[u8; 32]>,
-    #[serde(skip, default)]
-    pub session: Session,
-    pub username: Option<String>,
     pub trusted: bool,
+    #[serde(skip)]
+    pub session: Session,
 }
 
 impl Peer {
-    pub fn new(public_key: Option<[u8; 32]>, session: Session, username: Option<String>) -> Self {
+    pub fn new(public_key: Option<[u8; 32]>) -> Self {
         Self {
-            public_key: public_key,
-            session: session,
-            username: username,
+            public_key,
             trusted: false,
+            session: Session::None,
         }
     }
-    pub fn new_trusted(
-        public_key: Option<[u8; 32]>,
-        session: Session,
-        username: Option<String>,
-        trusted: bool,
-    ) -> Self {
+    pub fn new_trusted(public_key: Option<[u8; 32]>, trusted: bool) -> Self {
         Self {
-            public_key: public_key,
-            session: session,
-            username: username,
-            trusted: trusted,
+            public_key,
+            trusted,
+            session: Session::None,
         }
     }
     pub fn has_static_key(&self) -> bool {
         self.public_key.is_some()
     }
     pub fn fingerprint(&self) -> String {
-        let public_key_bytes = self.public_key.unwrap();
+        let Some(public_key_bytes) = self.public_key else {
+            return "<unknown>".to_string();
+        };
 
         let actual_digest = digest::digest(&digest::SHA256, &public_key_bytes);
 
@@ -110,18 +104,10 @@ mod tests {
     #[test]
     fn test_peer_has_static_key() {
         let keypair = create_keypair();
-        let (_, transport) = complete_handshake_xx();
-
-        let peer_without_key = Peer::new(None, Session::Established(transport), None);
+        let peer_without_key = Peer::new(None);
         assert!(!peer_without_key.has_static_key());
 
-        let (_, transport2) = complete_handshake_xx();
-
-        let peer_with_key = Peer::new(
-            Some(keypair.public.try_into().expect("invalid key length")),
-            Session::Established(transport2),
-            None,
-        );
+        let peer_with_key = Peer::new(Some(keypair.public.try_into().expect("invalid key length")));
         assert!(peer_with_key.has_static_key());
     }
 
@@ -149,9 +135,31 @@ mod tests {
     #[test]
     fn test_peer_fingerprint_consistent() {
         let public_key = [1u8; 32];
-        let peer1 = Peer::new(Some(public_key), Session::None, None);
-        let peer2 = Peer::new(Some(public_key), Session::None, None);
+        let peer1 = Peer::new(Some(public_key));
+        let peer2 = Peer::new(Some(public_key));
 
         assert_eq!(peer1.fingerprint(), peer2.fingerprint());
+    }
+
+    #[test]
+    fn test_peer_fingerprint_no_key() {
+        let peer = Peer::new(None);
+        assert_eq!(peer.fingerprint(), "<unknown>");
+    }
+
+    #[test]
+    fn test_session_debug_none() {
+        let session = Session::None;
+        assert_eq!(format!("{:?}", session), "Session::None");
+    }
+
+    #[test]
+    fn test_peer_new_trusted() {
+        let key = [7u8; 32];
+        let peer = Peer::new_trusted(Some(key), true);
+
+        assert!(peer.trusted);
+        assert_eq!(peer.public_key, Some(key));
+        assert!(matches!(peer.session, Session::None));
     }
 }
