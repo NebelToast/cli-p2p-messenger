@@ -1,5 +1,5 @@
 [package]
-name = "networktesting"
+name = "cli-p2p-messenger"
 version = "0.1.0"
 edition = "2024"
 
