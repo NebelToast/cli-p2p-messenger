@@ -1,4 +1,4 @@
-use networktesting::{
+use cli_p2p_messenger::{
     modules::{
         crypto::generate_or_load_keypair,
         network::send_message,

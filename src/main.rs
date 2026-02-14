@@ -10,7 +10,9 @@ use std::{
     thread,
 };
 
-use networktesting::{crypto::generate_or_load_keypair, network::*, packet::Packet, session::Peer};
+use cli_p2p_messenger::{
+    crypto::generate_or_load_keypair, network::*, packet::Packet, session::Peer,
+};
 fn set_destination(peer_map: &Arc<Mutex<HashMap<SocketAddr, Peer>>>) -> Option<SocketAddr> {
     let contacts: Vec<SocketAddr> = peer_map
         .lock()
