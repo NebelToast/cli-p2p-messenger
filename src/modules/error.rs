@@ -62,7 +62,7 @@ mod tests {
 
     #[test]
     fn test_connecterror_formating_send_message() {
-        let err = ConnectErrors::SendMessage(io::Error::new(io::ErrorKind::Other, "test error"));
+        let err = ConnectErrors::SendMessage(io::Error::other("test error"));
         assert_eq!(err.to_string(), "Failed to send message: test error");
     }
     #[test]
@@ -78,7 +78,7 @@ mod tests {
 
     #[test]
     fn test_keygenerationerror_read_file() {
-        let err = KeyGenerationError::ReadFile(io::Error::new(io::ErrorKind::Other, "read error"));
+        let err = KeyGenerationError::ReadFile(io::Error::other("read error"));
         assert_eq!(err.to_string(), "Failed to read file: read error");
     }
 
@@ -89,13 +89,13 @@ mod tests {
     }
     #[test]
     fn test_io_to_key_generation_error() {
-        let err = io::Error::new(io::ErrorKind::Other, "test error");
+        let err = io::Error::other("test error");
         let key_err: KeyGenerationError = err.into();
         assert!(matches!(key_err, KeyGenerationError::ReadFile(_)))
     }
     #[test]
     fn test_io_to_connect_error() {
-        let err = io::Error::new(io::ErrorKind::Other, "test error");
+        let err = io::Error::other("test error");
         let connect_err: ConnectErrors = err.into();
         assert!(matches!(connect_err, ConnectErrors::SendMessage(_)))
     }

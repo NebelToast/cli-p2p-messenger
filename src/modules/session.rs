@@ -1,17 +1,14 @@
 use ring::digest;
 use serde::{Deserialize, Serialize};
 
+#[derive(Default)]
 pub enum Session {
+    #[default]
     None,
-    Handshaking(snow::HandshakeState),
+    Handshaking(Box<snow::HandshakeState>),
     Established(snow::TransportState),
 }
 
-impl Default for Session {
-    fn default() -> Self {
-        Session::None
-    }
-}
 
 impl std::fmt::Debug for Session {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -119,7 +116,7 @@ mod tests {
             .unwrap()
             .build_initiator()
             .unwrap();
-        let session = Session::Handshaking(handshake);
+        let session = Session::Handshaking(Box::new(handshake));
         let debug_str = format!("{:?}", session);
         assert_eq!(debug_str, "Session::Handshaking");
     }

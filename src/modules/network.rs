@@ -20,21 +20,19 @@ pub fn connect(
     sock: &UdpSocket,
     map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
 ) -> Result<(), ConnectErrors> {
-    if let Some(peer) = map.lock().expect("mutex poisoned").get(&destination) {
-        if matches!(peer.session, Session::Established(_)) {
+    if let Some(peer) = map.lock().expect("mutex poisoned").get(&destination)
+        && matches!(peer.session, Session::Established(_)) {
             println!("Session already established with {}", destination);
             return Ok(());
         }
-    }
 
     let mut static_key = false;
     let mut static_key_k: Option<[u8; 32]> = None;
-    if let Some(peer) = map.lock().expect("mutex poisoned").get(&destination) {
-        if peer.has_static_key() {
+    if let Some(peer) = map.lock().expect("mutex poisoned").get(&destination)
+        && peer.has_static_key() {
             static_key = true;
-            static_key_k = peer.public_key.clone()
+            static_key_k = peer.public_key
         }
-    }
     let mut transport_state = if static_key {
         println!("Using Noise_KK pattern (known peer)");
         Builder::new(
@@ -66,7 +64,7 @@ pub fn connect(
     sock.send_to(&flagged, destination)?;
 
     let mut peer = Peer::new_trusted(static_key_k, static_key);
-    peer.session = Session::Handshaking(transport_state);
+    peer.session = Session::Handshaking(Box::new(transport_state));
     map.lock()
         .expect("mutex poisoned")
         .insert(destination, peer);
@@ -225,9 +223,7 @@ pub fn handle_incoming_packets(
         return;
     };
 
-    if !peers.contains_key(&src) {
-        peers.insert(src, Peer::new(None));
-    }
+    peers.entry(src).or_insert_with(|| Peer::new(None));
 
     let peer = peers.get_mut(&src).expect("peer should exist");
 
@@ -260,7 +256,7 @@ pub fn handle_incoming_packets(
                         Err(_) => println!("couldn't transform handshake to transport state"),
                     }
                 } else {
-                    peer.session = Session::Handshaking(handshake);
+                    peer.session = Session::Handshaking(Box::new(handshake));
                 }
             }
         }

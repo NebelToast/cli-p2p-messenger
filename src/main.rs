@@ -37,10 +37,7 @@ fn set_destination(peer_map: &Arc<Mutex<HashMap<SocketAddr, Peer>>>) -> Option<S
             println!("IP (with port)?: ");
             input.clear();
             stdin().read_line(&mut input).expect("Failed to read line");
-            match input.trim().parse() {
-                Ok(destination) => Some(destination),
-                Err(_) => None,
-            }
+            input.trim().parse().ok()
         }
         "y" => {
             contacts
@@ -215,7 +212,7 @@ fn client(socket: UdpSocket) {
                 "fingerprint" => {
                     let public_key_bytes = &key_pair.lock().expect("poisoned mutex").public;
 
-                    let actual_digest = digest::digest(&digest::SHA256, &public_key_bytes);
+                    let actual_digest = digest::digest(&digest::SHA256, public_key_bytes);
 
                     println!("{}", hex::encode(actual_digest.as_ref()));
                 }
