@@ -108,7 +108,10 @@ pub fn handle_handshake_message(
     let mut message_buffer = [0_u8; 65535];
 
     if let Err(e) = handshake.read_message(&recv_buffer[..bytes], &mut message_buffer) {
-        println!("Failed to read handshake message from {}: {}", src, e);
+        println!(
+            "Failed to read handshake message from {}: {} falling back to XX pattern",
+            src, e
+        );
         return false;
     }
 
@@ -143,6 +146,13 @@ pub fn handle_new_connection(
     };
     println!("Responding with {} pattern", pattern);
 
+    if recv_buffer[..bytes].len() == 48 && pattern == "Noise_XX_25519_ChaChaPoly_SHA256" {
+        println!(
+            "Initiator sent KK handshake but we don't know them, rejecting so they retry with XX"
+        );
+        send_reject(socket, &src);
+        return None;
+    }
     let key_guard = key_pair.lock().expect("mutex poisoned");
     let mut builder = Builder::new(pattern.parse().expect("invalid noise pattern"))
         .local_private_key(&key_guard.private)
@@ -159,6 +169,14 @@ pub fn handle_new_connection(
         .expect("couldn't build transport state");
 
     if let Err(e) = transport_state.read_message(&recv_buffer[..bytes], &mut message_buffer) {
+        if remote_public_key.is_some() {
+            println!(
+                "KK handshake failed with {}: {}, falling back to XX pattern",
+                src, e
+            );
+            drop(key_guard);
+            return handle_new_connection(recv_buffer, bytes, src, socket, key_pair, None);
+        }
         println!(
             "Failed to read initial handshake message from {}: {}",
             src, e
@@ -240,6 +258,18 @@ pub fn handle_incoming_packets(
                 if handshake.is_handshake_finished() {
                     match handshake.into_transport_mode() {
                         Ok(transport) => {
+                            if let Some(stored_key) = peer.public_key.as_ref() {
+                                if let Some(remote_static) = transport.get_remote_static() {
+                                    if remote_static != stored_key {
+                                        println!(
+                                            "Static key mismatch for {} after XX fallback, rejecting",
+                                            src
+                                        );
+                                        send_reject(socket_clone, &src);
+                                        return;
+                                    }
+                                }
+                            }
                             if peer.public_key.is_none() {
                                 peer.public_key = transport
                                     .get_remote_static()

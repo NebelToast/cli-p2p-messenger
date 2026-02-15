@@ -5,7 +5,7 @@ use cli_p2p_messenger::{
         packet::{Packet, SessionFlag},
         session::Peer,
     },
-    network::{connect, handle_incoming_packets, load_peers, save_peers},
+    network::{connect, delete_contacts, handle_incoming_packets, load_peers, save_peers},
 };
 use std::{
     collections::HashMap,
@@ -325,13 +325,24 @@ fn end_to_end_save_reload_and_reconnect() {
     );
 
     thread::sleep(Duration::from_millis(200));
-    responder
-        .peer_map
-        .lock()
-        .unwrap()
-        .get_mut(&initiator.addr())
-        .unwrap()
-        .trusted = true;
+
+    {
+        let peers = initiator.peer_map.lock().unwrap();
+        let peer = peers
+            .get(&responder.addr())
+            .expect("Peer must be in initiator's map after reconnect");
+        assert!(peer.trusted);
+        assert!(peer.public_key.is_some());
+    }
+
+    {
+        let mut peers = responder.peer_map.lock().unwrap();
+        let peer = peers
+            .get_mut(&initiator.addr())
+            .expect("Responder must have a peer entry for the initiator after reconnect");
+        assert!(peer.public_key.is_some());
+        peer.trusted = true;
+    }
 
     send_message(
         &initiator.peer_map,
@@ -356,4 +367,67 @@ fn reject_from_unknown_peer() {
     node.handle_packet(&flagged, src);
 
     assert!(!node.peer_map.lock().unwrap().contains_key(&src));
+}
+#[test]
+fn end_to_end_save_reload_and_reconnect_deletion_of_contacts() {
+    let initiator = TestNode::new();
+    let responder = TestNode::new();
+    let dir = tempdir().unwrap();
+
+    initiator.peer_map.lock().unwrap().insert(
+        responder.addr(),
+        Peer::new(Some(responder.public_key().try_into().unwrap())),
+    );
+    responder.peer_map.lock().unwrap().insert(
+        initiator.addr(),
+        Peer::new(Some(initiator.public_key().try_into().unwrap())),
+    );
+
+    save_peers(dir.path(), &initiator.peer_map);
+    delete_contacts(dir.path());
+    let loaded = load_peers(dir.path());
+    {
+        let mut peers = initiator.peer_map.lock().unwrap();
+        peers.clear();
+        for (addr, peer) in loaded {
+            peers.insert(addr, peer);
+        }
+    }
+
+    responder.spawn_listener();
+    initiator.spawn_listener();
+
+    assert!(
+        connect(
+            &responder.addr(),
+            &initiator.keypair,
+            &initiator.socket,
+            Arc::clone(&initiator.peer_map),
+        )
+        .is_ok()
+    );
+
+    thread::sleep(Duration::from_millis(200));
+
+    {
+        let mut peers = responder.peer_map.lock().unwrap();
+        let peer = peers
+            .get_mut(&initiator.addr())
+            .expect("Responder must have a peer entry for the initiator after reconnect");
+        assert!(peer.public_key.is_some());
+        peer.trusted = true;
+    }
+    send_message(
+        &initiator.peer_map,
+        &responder.addr(),
+        "After reload",
+        &initiator.socket,
+    );
+    thread::sleep(Duration::from_millis(200));
+    let stored = responder.packets.lock().unwrap();
+    assert!(!stored.is_empty());
+    assert_eq!(
+        std::str::from_utf8(&stored[0].payload[..stored[0].bytes]).unwrap(),
+        "After reload"
+    );
 }
