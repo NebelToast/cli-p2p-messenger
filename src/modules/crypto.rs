@@ -8,6 +8,7 @@ use std::path::Path;
 const PATTERN: &str = "Noise_XX_25519_ChaChaPoly_SHA256";
 
 pub fn generate_or_load_keypair(dir: &Path) -> Result<Keypair, KeyGenerationError> {
+
     let private_key_path = dir.join("private.key");
     let public_key_path = dir.join("public.key");
 

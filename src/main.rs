@@ -2,7 +2,7 @@ use local_ip_address::local_ip;
 use ring::digest;
 use std::{
     collections::HashMap,
-    env,
+    env, fs,
     io::stdin,
     net::{SocketAddr, UdpSocket},
     path::Path,
@@ -13,6 +13,7 @@ use std::{
 use cli_p2p_messenger::{
     crypto::generate_or_load_keypair, network::*, packet::Packet, session::Peer,
 };
+
 fn set_destination(peer_map: &Arc<Mutex<HashMap<SocketAddr, Peer>>>) -> Option<SocketAddr> {
     let contacts: Vec<SocketAddr> = peer_map
         .lock()
@@ -70,18 +71,24 @@ fn set_destination(peer_map: &Arc<Mutex<HashMap<SocketAddr, Peer>>>) -> Option<S
 
 fn client(socket: UdpSocket) {
     {
+        let path = std::env::home_dir()
+            .unwrap()
+            .join(".local/share/cli-p2p-messenger");
+        if !fs::exists(&path).unwrap() {
+            fs::create_dir(&path).unwrap();
+        }
         let mut input = String::new();
         let mut destination: SocketAddr = "127.0.0.1:500".parse().expect("invalid IP");
         let socket_clone = socket.try_clone().expect("couldn't clone the socket");
-        let loaded_messages: Vec<Packet> = load_messages(Path::new("."));
+        let loaded_messages: Vec<Packet> = load_messages(Path::new(&path));
         let packages: Arc<Mutex<Vec<Packet>>> = Arc::new(Mutex::new(loaded_messages));
         let writer = Arc::clone(&packages);
         let key_pair = Arc::new(Mutex::new(
-            generate_or_load_keypair(Path::new(".")).expect("couldn't generate keypair"),
+            generate_or_load_keypair(Path::new(&path)).expect("couldn't generate keypair"),
         ));
         let key_pair_clone = Arc::clone(&key_pair);
 
-        let loaded_peers: HashMap<SocketAddr, Peer> = load_peers(Path::new("."));
+        let loaded_peers: HashMap<SocketAddr, Peer> = load_peers(Path::new(&path));
         let peer_map = Arc::new(Mutex::new(loaded_peers));
         let peer_map_clone = Arc::clone(&peer_map);
         thread::spawn(move || {
@@ -206,8 +213,8 @@ fn client(socket: UdpSocket) {
                         .for_each(|addr| println!("{}", addr.0));
                 }
                 "save" => {
-                    save_message(Path::new("."), &packages);
-                    save_peers(Path::new("."), &peer_map);
+                    save_message(Path::new(&path), &packages);
+                    save_peers(Path::new(&path), &peer_map);
                 }
                 "fingerprint" => {
                     let public_key_bytes = &key_pair.lock().expect("poisoned mutex").public;
@@ -252,7 +259,7 @@ fn client(socket: UdpSocket) {
                     };
                 }
                 "clear" => {
-                    delete_contacts(Path::new("."));
+                    delete_contacts(Path::new(&path));
                     peer_map.lock().unwrap().clear();
                 }
                 "help" => {
