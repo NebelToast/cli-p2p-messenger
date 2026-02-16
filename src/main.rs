@@ -171,7 +171,7 @@ fn client(socket: UdpSocket) {
                                         } else {
                                             send_reject(&socket, &destination);
                                             peer_map.lock().unwrap().remove(&destination);
-                                            println!("Connection rejected.");
+                                            println!("Connection terminated.");
                                         }
                                     }
                                 } else {
@@ -262,6 +262,40 @@ fn client(socket: UdpSocket) {
                     delete_contacts(Path::new(&path));
                     peer_map.lock().unwrap().clear();
                 }
+                "disconnect" => {
+                    let mut peer_map = peer_map.lock().expect("poisoned mutex");
+
+                    let trusted: Vec<SocketAddr> = peer_map
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, (addr, peer))| {
+                            if peer.trusted {
+                                println!("[{}] {} ", i + 1, addr);
+                                return Some(*addr);
+                            }
+                            None
+                        })
+                        .collect();
+                    if trusted.is_empty() {
+                        println!("No one to disconnect from");
+                        continue;
+                    }
+                    input.clear();
+                    stdin().read_line(&mut input).unwrap();
+
+                    if let Ok(number) = input.trim().parse::<usize>() {
+                        if number > 0 && number <= trusted.len() {
+                            let target_addr = trusted[number - 1];
+                            send_reject(&socket, &target_addr);
+                            peer_map.remove(&target_addr);
+                            println!("disconnected");
+                        } else {
+                            println!("Invalid selection");
+                        }
+                    } else {
+                        println!("Invalid input");
+                    };
+                }
                 "help" => {
                     println!(
                         "\nconnect: Connect to new or known peer.
@@ -273,6 +307,7 @@ help: Display help for commands.
 save: Saves the connections to a file
 fingerprint: Display own public key fingerprint
 approve: approve clients that want to connect
+disconnect: disconnects from a peer.
 <text>: Send message to current destination"
                     );
                 }

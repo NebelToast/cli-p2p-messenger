@@ -331,7 +331,7 @@ pub fn handle_incoming_packets(
             }
         }
         SessionFlag::Reject => {
-            println!("Connection rejected by {}", src);
+            println!("Connection terminated by {}", src);
             peers.remove(&src);
         }
         SessionFlag::Transport => {
