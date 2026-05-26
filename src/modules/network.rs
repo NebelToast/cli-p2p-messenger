@@ -209,15 +209,23 @@ pub fn send_message(
     input: &str,
     socket: &UdpSocket,
 ) {
-    let peers = peer_map.lock().expect("mutex poisoned");
-    if peers.contains_key(&destination) {
-        let mut buf = vec![SessionFlag::Transport as u8];
-        buf.extend_from_slice(input.trim().as_bytes());
-        match socket.send_to(&buf, destination) {
-            Ok(_) => {
-                println!("{} bytes sent", input.trim().len());
+    let mut peers = peer_map.lock().expect("mutex poisoned");
+    if let Some(peer) = peers.get_mut(&destination) {
+        if let Session::Established(transport) = &mut peer.session {
+            let mut ciphertext = vec![0_u8; input.trim().len() + 16];
+            match transport.write_message(input.trim().as_bytes(), &mut ciphertext) {
+                Ok(len) => {
+                    let mut packet = vec![SessionFlag::Transport as u8];
+                    packet.extend_from_slice(&ciphertext[..len]);
+                    match socket.send_to(&packet, destination) {
+                        Ok(_) => {
+                            println!("{} bytes sent", input.trim().len());
+                        }
+                        Err(erro) => println!("{}", erro),
+                    }
+                }
+                Err(e) => println!("couldn't send message: {}", e),
             }
-            Err(erro) => println!("{}", erro),
         }
     } else {
         println!(
@@ -338,12 +346,24 @@ pub fn handle_incoming_packets(
             let Some(peer) = peers.get_mut(&src) else {
                 return;
             };
-            if peer.trusted {
-                let packet = Packet::new(src, payload.len(), payload.to_vec().into_boxed_slice());
-                if let Err(e) = packet.print_message() {
-                    print!("{}", e);
+            if let Session::Established(transport) = &mut peer.session {
+                let mut message_buffer = [0_u8; 65535];
+                let len =
+                    match transport.read_message(&payload[..payload.len()], &mut message_buffer) {
+                        Ok(len) => len,
+                        Err(e) => {
+                            println!("Failed to decrypt message from {}: {}", src, e);
+                            return;
+                        }
+                    };
+
+                if peer.trusted {
+                    let packet = Packet::new(src, len, message_buffer[..len].to_vec().into_boxed_slice());
+                    if let Err(e) = packet.print_message() {
+                        print!("{}", e);
+                    }
+                    writer.lock().expect("mutex poisoned").push(packet);
                 }
-                writer.lock().expect("mutex poisoned").push(packet);
             }
         }
     }
@@ -483,6 +503,7 @@ mod tests {
 
     #[test]
     fn test_send_message_delivers_flagged_payload() {
+        let (sender_transport, mut receiver_transport) = complete_handshake_xx();
         let peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>> = Arc::new(Mutex::new(HashMap::new()));
 
         let sender_socket = UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -492,10 +513,9 @@ mod tests {
             .unwrap();
         let receiver_addr = receiver_socket.local_addr().unwrap();
 
-        peer_map
-            .lock()
-            .unwrap()
-            .insert(receiver_addr, Peer::new(None));
+        let mut peer = Peer::new(None);
+        peer.session = Session::Established(sender_transport);
+        peer_map.lock().unwrap().insert(receiver_addr, peer);
 
         send_message(&peer_map, &receiver_addr, "Test message", &sender_socket);
 
@@ -503,8 +523,14 @@ mod tests {
         let (len, _) = receiver_socket.recv_from(&mut recv_buf).unwrap();
 
         assert_eq!(recv_buf[0], 0x02);
+
+        let mut plaintext = [0u8; 65535];
+        let plaintext_len = receiver_transport
+            .read_message(&recv_buf[1..len], &mut plaintext)
+            .unwrap();
+
         assert_eq!(
-            std::str::from_utf8(&recv_buf[1..len]).unwrap(),
+            std::str::from_utf8(&plaintext[..plaintext_len]).unwrap(),
             "Test message"
         );
     }

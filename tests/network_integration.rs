@@ -90,23 +90,50 @@ fn invalid_flag_byte_does_not_create_peer() {
 
 #[test]
 fn transport_message_stored_only_for_trusted_peer() {
-    let node = TestNode::new();
-    let src: SocketAddr = "127.0.0.1:3333".parse().unwrap();
+    let initiator = TestNode::new();
+    let responder = TestNode::new();
+    responder.spawn_listener();
+    initiator.spawn_listener();
 
-    node.peer_map.lock().unwrap().insert(src, Peer::new(None));
-    let mut flagged = vec![SessionFlag::Transport as u8];
-    flagged.extend_from_slice(b"Secret data");
-    node.handle_packet(&flagged, src);
+    let result = connect(
+        &responder.addr(),
+        &initiator.keypair,
+        &initiator.socket,
+        Arc::clone(&initiator.peer_map),
+    );
+    assert!(result.is_ok());
 
-    assert!(node.packets.lock().unwrap().is_empty());
+    thread::sleep(Duration::from_millis(300));
+    send_message(
+        &initiator.peer_map,
+        &responder.addr(),
+        "Untrusted message",
+        &initiator.socket,
+    );
+    thread::sleep(Duration::from_millis(150));
+    assert!(responder.packets.lock().unwrap().is_empty());
 
-    node.peer_map.lock().unwrap().get_mut(&src).unwrap().trusted = true;
-    node.handle_packet(&flagged, src);
-    let stored = node.packets.lock().unwrap();
 
+    responder
+        .peer_map
+        .lock()
+        .unwrap()
+        .get_mut(&initiator.addr())
+        .unwrap()
+        .trusted = true;
+
+    send_message(
+        &initiator.peer_map,
+        &responder.addr(),
+        "Trusted message",
+        &initiator.socket,
+    );
+    thread::sleep(Duration::from_millis(150));
+
+    let stored = responder.packets.lock().unwrap();
     assert_eq!(stored.len(), 1);
-    assert_eq!(&stored[0].payload[..stored[0].bytes], b"Secret data");
-    assert_eq!(stored[0].sender, src);
+    assert_eq!(&stored[0].payload[..stored[0].bytes], b"Trusted message");
+    assert_eq!(stored[0].sender, initiator.addr());
 }
 
 #[test]
