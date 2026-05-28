@@ -358,7 +358,8 @@ pub fn handle_incoming_packets(
                     };
 
                 if peer.trusted {
-                    let packet = Packet::new(src, len, message_buffer[..len].to_vec().into_boxed_slice());
+                    let packet =
+                        Packet::new(src, len, message_buffer[..len].to_vec().into_boxed_slice());
                     if let Err(e) = packet.print_message() {
                         print!("{}", e);
                     }
@@ -370,17 +371,17 @@ pub fn handle_incoming_packets(
 }
 
 pub fn load_peers(dir: &Path) -> HashMap<SocketAddr, Peer> {
-    match fs::read(dir.join("peers.json")) {
-        Ok(data) => serde_json::from_slice(&data).unwrap(),
-        Err(_) => HashMap::new(),
-    }
+    fs::read(dir.join("peers.json"))
+        .ok()
+        .and_then(|data| serde_json::from_slice(&data).ok())
+        .unwrap_or_default()
 }
 
 pub fn load_messages(dir: &Path) -> Vec<Packet> {
-    match fs::read(dir.join("messages.json")) {
-        Ok(data) => serde_json::from_slice(&data).unwrap(),
-        Err(_) => vec![],
-    }
+    fs::read(dir.join("message.json"))
+        .ok()
+        .and_then(|data| serde_json::from_slice(&data).ok())
+        .unwrap_or_default()
 }
 pub fn save_peers(dir: &Path, peer_map: &Arc<Mutex<HashMap<SocketAddr, Peer>>>) {
     let serialized_peers = serde_json::to_string(&*peer_map.lock().unwrap()).unwrap();
