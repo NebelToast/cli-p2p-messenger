@@ -1,6 +1,6 @@
 [package]
 name = "cli-p2p-messenger"
-version = "1.0.0"
+version = "1.4.0"
 edition = "2024"
 
 [dependencies]
