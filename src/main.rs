@@ -16,9 +16,7 @@ use cli_p2p_messenger::{
 };
 
 fn set_destination(peers: &PeerRegistry) -> Option<SocketAddr> {
-    let contacts: Vec<SocketAddr> = peers.with_peers(|peers| {
-        peers.keys().cloned().collect()
-    });
+    let contacts: Vec<SocketAddr> = peers.with_peers(|peers| peers.keys().cloned().collect());
     let mut input = String::new();
     if !contacts.is_empty() {
         println!(
@@ -201,7 +199,12 @@ fn client(socket: UdpSocket) {
                             .enumerate()
                             .filter_map(|(i, (addr, peer))| {
                                 if !peer.trusted {
-                                    println!("[{}] {} fingerprint {}", i + 1, addr, peer.fingerprint());
+                                    println!(
+                                        "[{}] {} fingerprint {}",
+                                        i + 1,
+                                        addr,
+                                        peer.fingerprint()
+                                    );
                                     return Some(*addr);
                                 }
                                 None
@@ -254,6 +257,17 @@ fn client(socket: UdpSocket) {
                         println!("Invalid input");
                     };
                 }
+                "exit" => {
+                    let count = peers
+                        .get_trusted_peers()
+                        .iter()
+                        .map(|addr| send_reject(&socket, addr))
+                        .count();
+                    println!("disconnected from {}", count);
+                    save_message(Path::new(&path), &packages);
+                    save_peers(Path::new(&path), &peers);
+                    break;
+                }
                 "help" => {
                     println!(
                         "\nconnect: Connect to new or known peer.
@@ -266,6 +280,7 @@ save: Saves the connections to a file
 fingerprint: Display own public key fingerprint
 approve: approve clients that want to connect
 disconnect: disconnects from a peer.
+exit: disconnects from all peers and saves the contacts before exiting.
 <text>: Send message to current destination"
                     );
                 }
