@@ -7,7 +7,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::session::{Peer, Session};
+use crate::session::{Peer, PeerRegistry, Session};
 
 use super::{
     error::ConnectErrors,
@@ -18,33 +18,19 @@ pub fn connect(
     &destination: &SocketAddr,
     key: &Arc<Mutex<Keypair>>,
     sock: &UdpSocket,
-    map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
+    peer: PeerRegistry,
 ) -> Result<(), ConnectErrors> {
-    if let Some(peer) = map.lock().expect("mutex poisoned").get(&destination)
-        && matches!(peer.session, Session::Established(_))
-    {
+    if peer.is_established(&destination) {
         println!("Session already established with {}", destination);
         return Ok(());
     }
 
-    let mut static_key = false;
-    let mut static_key_k: Option<[u8; 32]> = None;
-    if let Some(peer) = map.lock().expect("mutex poisoned").get(&destination)
-        && peer.has_static_key()
-    {
-        static_key = true;
-        static_key_k = peer.public_key
-    }
-    let mut transport_state = if static_key {
+    let mut transport_state = if let Some(pub_key) = peer.get_public_key(&destination) {
         println!("Using Noise_KK pattern (known peer)");
-        Builder::new(
-            "Noise_KK_25519_ChaChaPoly_SHA256"
-                .parse()
-                .expect("Invalid snow pattern"),
-        )
-        .local_private_key(&key.lock().unwrap().private)?
-        .remote_public_key(static_key_k.as_ref().unwrap())?
-        .build_initiator()?
+        Builder::new("Noise_KK_25519_ChaChaPoly_SHA256".parse().unwrap())
+            .local_private_key(&key.lock().unwrap().private)?
+            .remote_public_key(&pub_key)?
+            .build_initiator()?
     } else {
         println!("Using Noise_XX pattern (new peer)");
         Builder::new(
@@ -65,11 +51,12 @@ pub fn connect(
 
     sock.send_to(&flagged, destination)?;
 
-    let mut peer = Peer::new_trusted(static_key_k, static_key);
-    peer.session = Session::Handshaking(Box::new(transport_state));
-    map.lock()
-        .expect("mutex poisoned")
-        .insert(destination, peer);
+    let static_key = peer.get_public_key(&destination);
+    let is_known = static_key.is_some();
+    let mut new_peer = Peer::new_trusted(static_key, is_known);
+    new_peer.session = Session::Handshaking(Box::new(transport_state));
+    peer.create_peer(&destination, new_peer);
+
     Ok(())
 }
 
@@ -204,34 +191,30 @@ pub fn send_reject(socket: &UdpSocket, destination: &SocketAddr) {
 }
 
 pub fn send_message(
-    peer_map: &Arc<Mutex<HashMap<SocketAddr, Peer>>>,
+    peer: PeerRegistry,
     &destination: &SocketAddr,
     input: &str,
     socket: &UdpSocket,
 ) {
-    let mut peers = peer_map.lock().expect("mutex poisoned");
-    if let Some(peer) = peers.get_mut(&destination) {
-        if let Session::Established(transport) = &mut peer.session {
-            let mut ciphertext = vec![0_u8; input.trim().len() + 16];
-            match transport.write_message(input.trim().as_bytes(), &mut ciphertext) {
-                Ok(len) => {
-                    let mut packet = vec![SessionFlag::Transport as u8];
-                    packet.extend_from_slice(&ciphertext[..len]);
-                    match socket.send_to(&packet, destination) {
-                        Ok(_) => {
-                            println!("{} bytes sent", input.trim().len());
-                        }
-                        Err(erro) => println!("{}", erro),
-                    }
-                }
-                Err(e) => println!("couldn't send message: {}", e),
+    let mut ciphertext = vec![0_u8; input.trim().len() + 16];
+
+    match peer.encrypt_message(&destination, input.trim().as_bytes(), &mut ciphertext) {
+        Ok(len) => {
+            let mut packet = vec![SessionFlag::Transport as u8];
+            packet.extend_from_slice(&ciphertext[..len]);
+
+            if let Err(e) = socket.send_to(&packet, destination) {
+                println!("Failed to send packet: {}", e);
+            } else {
+                println!("{} bytes sent", input.trim().len());
             }
         }
-    } else {
-        println!(
-            "No connection to {}. Please run 'connect' first.",
-            &destination
-        );
+        Err(e) => {
+            println!(
+                "No connection to {}. Please run 'connect' first. (Reason: {})",
+                &destination, e
+            );
+        }
     }
 }
 
@@ -241,134 +224,134 @@ pub fn handle_incoming_packets(
     src: SocketAddr,
     socket_clone: &UdpSocket,
     key_pair_clone: &Arc<Mutex<snow::Keypair>>,
-    peers: &Arc<Mutex<HashMap<SocketAddr, Peer>>>,
+    peer_registry: PeerRegistry,
     writer: &Arc<Mutex<Vec<Packet>>>,
 ) {
-    let mut peers = peers.lock().unwrap();
-
     let Some((flag, payload)) = split_flagged_payload(&recv_buffer[..bytes]) else {
         println!("invalid packet from {}: missing/invalid flag", src);
         return;
     };
 
-    match flag {
-        SessionFlag::Handshake => {
-            let peer = peers.entry(src).or_insert_with(|| Peer::new(None));
-            let remote_key = peer.public_key.as_ref().map(|k| k.as_slice());
-            if let Some(handshake) = handle_new_connection(
-                payload,
-                payload.len(),
-                src,
-                socket_clone,
-                key_pair_clone,
-                remote_key,
-            ) {
-                if handshake.is_handshake_finished() {
-                    match handshake.into_transport_mode() {
-                        Ok(transport) => {
-                            if let Some(stored_key) = peer.public_key.as_ref() {
-                                if let Some(remote_static) = transport.get_remote_static() {
-                                    if remote_static != stored_key {
-                                        println!(
-                                            "Static key mismatch for {} after XX fallback, rejecting",
-                                            src
-                                        );
-                                        send_reject(socket_clone, &src);
-                                        return;
-                                    }
-                                }
-                            }
-                            if peer.public_key.is_none() {
-                                peer.public_key = transport
-                                    .get_remote_static()
-                                    .map(|k| k.try_into().expect("invalid key length"));
-                            }
-                            peer.session = Session::Established(transport);
-                            println!(
-                                "Handshake completed with {} (fingerprint: {})",
-                                src,
-                                peer.fingerprint()
-                            );
-                        }
-                        Err(_) => println!("couldn't transform handshake to transport state"),
-                    }
-                } else {
-                    peer.session = Session::Handshaking(Box::new(handshake));
-                }
-            }
-        }
-        SessionFlag::HandshakeResponse => {
-            let Some(peer) = peers.get_mut(&src) else {
-                println!("Received handshake response from unknown peer {}", src);
-                return;
-            };
-            let session = std::mem::take(&mut peer.session);
-            if let Session::Handshaking(mut handshake) = session {
-                let finished = handle_handshake_message(
-                    &mut handshake,
+    peer_registry.with_peers_mut(|peers| {
+        match flag {
+            SessionFlag::Handshake => {
+                let peer = peers.entry(src).or_insert_with(|| Peer::new(None));
+                let remote_key = peer.public_key.as_ref().map(|k| k.as_slice());
+                
+                if let Some(handshake) = handle_new_connection(
                     payload,
                     payload.len(),
                     src,
                     socket_clone,
-                );
-                if finished {
-                    match handshake.into_transport_mode() {
-                        Ok(transport) => {
-                            if peer.public_key.is_none() {
-                                peer.public_key = transport
-                                    .get_remote_static()
-                                    .map(|k| k.try_into().expect("invalid key length"));
+                    key_pair_clone,
+                    remote_key,
+                ) {
+                    if handshake.is_handshake_finished() {
+                        match handshake.into_transport_mode() {
+                            Ok(transport) => {
+                                if let Some(stored_key) = peer.public_key.as_ref()
+                                    && let Some(remote_static) = transport.get_remote_static()
+                                        && remote_static != stored_key {
+                                            println!(
+                                                "Static key mismatch for {} after XX fallback, rejecting",
+                                                src
+                                            );
+                                            send_reject(socket_clone, &src);
+                                            return;
+                                        }
+                                if peer.public_key.is_none() {
+                                    peer.public_key = transport
+                                        .get_remote_static()
+                                        .map(|k| k.try_into().expect("invalid key length"));
+                                }
+                                peer.session = Session::Established(transport);
+                                println!(
+                                    "Handshake completed with {} (fingerprint: {})",
+                                    src,
+                                    peer.fingerprint()
+                                );
                             }
-                            peer.session = Session::Established(transport);
-                            println!(
-                                "Handshake completed with {} (fingerprint: {})",
-                                src,
-                                peer.fingerprint()
-                            );
+                            Err(_) => println!("couldn't transform handshake to transport state"),
                         }
-                        Err(_) => println!("couldn't transform handshake to transport state"),
+                    } else {
+                        peer.session = Session::Handshaking(Box::new(handshake));
+                    }
+                }
+            }
+            SessionFlag::HandshakeResponse => {
+                let Some(peer) = peers.get_mut(&src) else {
+                    println!("Received handshake response from unknown peer {}", src);
+                    return;
+                };
+                let session = std::mem::take(&mut peer.session);
+                if let Session::Handshaking(mut handshake) = session {
+                    let finished = handle_handshake_message(
+                        &mut handshake,
+                        payload,
+                        payload.len(),
+                        src,
+                        socket_clone,
+                    );
+                    if finished {
+                        match handshake.into_transport_mode() {
+                            Ok(transport) => {
+                                if peer.public_key.is_none() {
+                                    peer.public_key = transport
+                                        .get_remote_static()
+                                        .map(|k| k.try_into().expect("invalid key length"));
+                                }
+                                peer.session = Session::Established(transport);
+                                println!(
+                                    "Handshake completed with {} (fingerprint: {})",
+                                    src,
+                                    peer.fingerprint()
+                                );
+                            }
+                            Err(_) => println!("couldn't transform handshake to transport state"),
+                        }
+                    } else {
+                        peer.session = Session::Handshaking(handshake);
                     }
                 } else {
-                    peer.session = Session::Handshaking(handshake);
+                    println!(
+                        "Received handshake response from {} but no handshake in progress",
+                        src
+                    );
                 }
-            } else {
-                println!(
-                    "Received handshake response from {} but no handshake in progress",
-                    src
-                );
             }
-        }
-        SessionFlag::Reject => {
-            println!("Connection terminated by {}", src);
-            peers.remove(&src);
-        }
-        SessionFlag::Transport => {
-            let Some(peer) = peers.get_mut(&src) else {
-                return;
-            };
-            if let Session::Established(transport) = &mut peer.session {
-                let mut message_buffer = [0_u8; 65535];
-                let len =
-                    match transport.read_message(&payload[..payload.len()], &mut message_buffer) {
-                        Ok(len) => len,
-                        Err(e) => {
-                            println!("Failed to decrypt message from {}: {}", src, e);
-                            return;
-                        }
-                    };
+            SessionFlag::Reject => {
+                println!("Connection terminated by {}", src);
+                peers.remove(&src);
+            }
+            SessionFlag::Transport => {
+                let Some(peer) = peers.get_mut(&src) else {
+                    return;
+                };
+                if let Session::Established(transport) = &mut peer.session {
+                    let mut message_buffer = [0_u8; 65535];
+                    let len =
+                        match transport.read_message(&payload[..payload.len()], &mut message_buffer) {
+                            Ok(len) => len,
+                            Err(e) => {
+                                println!("Failed to decrypt message from {}: {}", src, e);
+                                return;
+                            }
+                        };
 
-                if peer.trusted {
-                    let packet =
-                        Packet::new(src, len, message_buffer[..len].to_vec().into_boxed_slice());
-                    if let Err(e) = packet.print_message() {
-                        print!("{}", e);
+                    if peer.trusted {
+                        let packet =
+                            Packet::new(src, len, message_buffer[..len].to_vec().into_boxed_slice());
+                        if let Err(e) = packet.print_message() {
+                            print!("{}", e);
+                        }
+                        writer.lock().expect("mutex poisoned").push(packet);
                     }
-                    writer.lock().expect("mutex poisoned").push(packet);
                 }
             }
         }
-    }
+    });
 }
+
 
 pub fn load_peers(dir: &Path) -> HashMap<SocketAddr, Peer> {
     fs::read(dir.join("peers.json"))
@@ -383,8 +366,10 @@ pub fn load_messages(dir: &Path) -> Vec<Packet> {
         .and_then(|data| serde_json::from_slice(&data).ok())
         .unwrap_or_default()
 }
-pub fn save_peers(dir: &Path, peer_map: &Arc<Mutex<HashMap<SocketAddr, Peer>>>) {
-    let serialized_peers = serde_json::to_string(&*peer_map.lock().unwrap()).unwrap();
+pub fn save_peers(dir: &Path, peer_registry: &PeerRegistry) {
+    let serialized_peers = peer_registry.with_peers(|peers| {
+        serde_json::to_string(peers).unwrap()
+    });
     std::fs::write(dir.join("peers.json"), serialized_peers).expect("Unable to write file");
 }
 pub fn save_message(dir: &Path, packages: &Arc<Mutex<Vec<Packet>>>) {
@@ -505,7 +490,7 @@ mod tests {
     #[test]
     fn test_send_message_delivers_flagged_payload() {
         let (sender_transport, mut receiver_transport) = complete_handshake_xx();
-        let peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>> = Arc::new(Mutex::new(HashMap::new()));
+        let registry = PeerRegistry::new(HashMap::new());
 
         let sender_socket = UdpSocket::bind("127.0.0.1:0").unwrap();
         let receiver_socket = UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -516,9 +501,9 @@ mod tests {
 
         let mut peer = Peer::new(None);
         peer.session = Session::Established(sender_transport);
-        peer_map.lock().unwrap().insert(receiver_addr, peer);
+        registry.create_peer(&receiver_addr, peer);
 
-        send_message(&peer_map, &receiver_addr, "Test message", &sender_socket);
+        send_message(registry, &receiver_addr, "Test message", &sender_socket);
 
         let mut recv_buf = [0u8; 65535];
         let (len, _) = receiver_socket.recv_from(&mut recv_buf).unwrap();
