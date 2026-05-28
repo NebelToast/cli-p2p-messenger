@@ -1,3 +1,9 @@
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+};
+
 use ring::digest;
 use serde::{Deserialize, Serialize};
 
@@ -53,6 +59,136 @@ impl Peer {
         let actual_digest = digest::digest(&digest::SHA256, &public_key_bytes);
 
         hex::encode(actual_digest.as_ref())
+    }
+}
+
+#[derive(Clone)]
+pub struct PeerRegistry {
+    peers: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
+}
+
+impl PeerRegistry {
+    pub fn new(initial_peers: HashMap<SocketAddr, Peer>) -> Self {
+        Self {
+            peers: Arc::new(Mutex::new(initial_peers)),
+        }
+    }
+    pub fn is_known(&self, addr: &SocketAddr) -> bool {
+        self.peers
+            .lock()
+            .unwrap()
+            .get(addr)
+            .map(|p| p.has_static_key())
+            .unwrap_or(false)
+    }
+    pub fn set_public_key(&self, addr: &SocketAddr, key: Option<[u8; 32]>) {
+        self.peers
+            .lock()
+            .unwrap()
+            .entry(*addr)
+            .or_insert_with(|| Peer::new(None))
+            .public_key = key;
+    }
+    pub fn set_session(&self, addr: &SocketAddr, session: Session) {
+        if let Some(peer) = self.peers.lock().unwrap().get_mut(addr) {
+            peer.session = session;
+        }
+    }
+    pub fn with_peers_mut<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut HashMap<SocketAddr, Peer>) -> R,
+    {
+        let mut peers = self.peers.lock().unwrap();
+        f(&mut peers)
+    }
+    pub fn with_peers<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&HashMap<SocketAddr, Peer>) -> R,
+    {
+        let peers = self.peers.lock().unwrap();
+        f(&peers)
+    }
+
+    pub fn get_fingerprint(&self, addr: &SocketAddr) -> String {
+        self.peers
+            .lock()
+            .unwrap()
+            .get(addr)
+            .map(|peer| peer.fingerprint())
+            .unwrap_or_else(|| "<unknown>".to_string())
+    }
+    pub fn get_trusted_peers(&self) -> Vec<SocketAddr> {
+        self.peers
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, peer)| peer.trusted)
+            .map(|(addr, _)| *addr)
+            .collect()
+    }
+    pub fn clear(&self) {
+        self.peers.lock().unwrap().clear();
+    }
+    pub fn set_trusted(&self, addr: &SocketAddr, trusted: bool) {
+        if let Some(peer) = self.peers.lock().unwrap().get_mut(addr) {
+            peer.trusted = trusted;
+        }
+    }
+
+    pub fn remove(&self, addr: &SocketAddr) {
+        self.peers.lock().unwrap().remove(addr);
+    }
+    pub fn is_established(&self, addr: &SocketAddr) -> bool {
+        self.peers
+            .lock()
+            .unwrap()
+            .get(addr)
+            .map(|p| matches!(p.session, Session::Established(_)))
+            .unwrap_or(false)
+    }
+    pub fn get_public_key(&self, addr: &SocketAddr) -> Option<[u8; 32]> {
+        self.peers
+            .lock()
+            .unwrap()
+            .get(addr)
+            .and_then(|p| p.public_key)
+    }
+    pub fn create_peer(&self, addr: &SocketAddr, peer: Peer) {
+        self.peers.lock().unwrap().insert(*addr, peer);
+    }
+    pub fn is_empty(&self) -> bool {
+        self.peers.lock().unwrap().is_empty()
+    }
+    pub fn contains_key(&self, addr: &SocketAddr) -> bool {
+        self.peers.lock().unwrap().contains_key(addr)
+    }
+    pub fn is_trusted(&self, addr: &SocketAddr) -> bool {
+        self.peers
+            .lock()
+            .unwrap()
+            .get(addr)
+            .map(|p| p.trusted)
+            .unwrap_or(false)
+    }
+    pub fn encrypt_message(
+        &self,
+        addr: &SocketAddr,
+        plaintext: &[u8],
+        ciphertext: &mut [u8],
+    ) -> Result<usize, String> {
+        let mut peers = self.peers.lock().unwrap();
+
+        if let Some(peer) = peers.get_mut(addr) {
+            if let Session::Established(transport) = &mut peer.session {
+                transport
+                    .write_message(plaintext, ciphertext)
+                    .map_err(|e| format!("Encryption error: {}", e))
+            } else {
+                Err("Session not established".to_string())
+            }
+        } else {
+            Err("Peer not found".to_string())
+        }
     }
 }
 

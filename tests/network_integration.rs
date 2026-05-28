@@ -3,7 +3,7 @@ use cli_p2p_messenger::{
         crypto::generate_or_load_keypair,
         network::send_message,
         packet::{Packet, SessionFlag},
-        session::Peer,
+        session::{Peer, PeerRegistry},
     },
     network::{connect, delete_contacts, handle_incoming_packets, load_peers, save_peers},
 };
@@ -23,7 +23,7 @@ fn create_keypair() -> snow::Keypair {
 
 struct TestNode {
     keypair: Arc<Mutex<snow::Keypair>>,
-    peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
+    peer_map: PeerRegistry,
     packets: Arc<Mutex<Vec<Packet>>>,
     socket: UdpSocket,
 }
@@ -32,7 +32,7 @@ impl TestNode {
     fn new() -> Self {
         Self {
             keypair: Arc::new(Mutex::new(create_keypair())),
-            peer_map: Arc::new(Mutex::new(HashMap::new())),
+            peer_map: PeerRegistry::new(HashMap::new()),
             packets: Arc::new(Mutex::new(vec![])),
             socket: UdpSocket::bind("127.0.0.1:0").unwrap(),
         }
@@ -53,13 +53,13 @@ impl TestNode {
             src,
             &self.socket,
             &self.keypair,
-            &self.peer_map,
+            self.peer_map.clone(),
             &self.packets,
         );
     }
 
     fn spawn_listener(&self) {
-        let pm = Arc::clone(&self.peer_map);
+        let pm = self.peer_map.clone();
         let kp = Arc::clone(&self.keypair);
         let pk = Arc::clone(&self.packets);
         let sock = self.socket.try_clone().unwrap();
@@ -68,7 +68,7 @@ impl TestNode {
                 let mut buf = [0u8; 65535];
                 match sock.recv_from(&mut buf) {
                     Ok((bytes, src)) => {
-                        handle_incoming_packets(&buf, bytes, src, &sock, &kp, &pm, &pk);
+                        handle_incoming_packets(&buf, bytes, src, &sock, &kp, pm.clone(), &pk);
                     }
                     Err(_) => break,
                 }
@@ -84,7 +84,7 @@ fn invalid_flag_byte_does_not_create_peer() {
 
     node.handle_packet(&[0x00, 1, 2, 3, 4, 5], src);
 
-    assert!(node.peer_map.lock().unwrap().is_empty());
+    assert!(node.peer_map.is_empty());
     assert!(node.packets.lock().unwrap().is_empty());
 }
 
@@ -99,13 +99,13 @@ fn transport_message_stored_only_for_trusted_peer() {
         &responder.addr(),
         &initiator.keypair,
         &initiator.socket,
-        Arc::clone(&initiator.peer_map),
+        initiator.peer_map.clone(),
     );
     assert!(result.is_ok());
 
     thread::sleep(Duration::from_millis(300));
     send_message(
-        &initiator.peer_map,
+        initiator.peer_map.clone(),
         &responder.addr(),
         "Untrusted message",
         &initiator.socket,
@@ -113,17 +113,10 @@ fn transport_message_stored_only_for_trusted_peer() {
     thread::sleep(Duration::from_millis(150));
     assert!(responder.packets.lock().unwrap().is_empty());
 
-
-    responder
-        .peer_map
-        .lock()
-        .unwrap()
-        .get_mut(&initiator.addr())
-        .unwrap()
-        .trusted = true;
+    responder.peer_map.set_trusted(&initiator.addr(), true);
 
     send_message(
-        &initiator.peer_map,
+        initiator.peer_map.clone(),
         &responder.addr(),
         "Trusted message",
         &initiator.socket,
@@ -145,28 +138,26 @@ fn send_message_without_peer() {
         .unwrap();
     let dest = receiver_socket.local_addr().unwrap();
 
-    send_message(&node.peer_map, &dest, "Should not arrive", &node.socket);
+    send_message(node.peer_map.clone(), &dest, "Should not arrive", &node.socket);
     let mut recv_buf = [0u8; 65535];
-
     assert!(receiver_socket.recv_from(&mut recv_buf).is_err());
 }
 
 #[test]
 fn save_and_load_peers() {
     let dir = tempdir().unwrap();
-    let peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>> = Arc::new(Mutex::new(HashMap::new()));
+    let peer_registry = PeerRegistry::new(HashMap::new());
     let addr1: SocketAddr = "10.0.0.1:1234".parse().unwrap();
     let addr2: SocketAddr = "192.168.0.5:5678".parse().unwrap();
     let key = [42u8; 32];
 
     {
-        let mut peers = peer_map.lock().unwrap();
         let mut peer1 = Peer::new(Some(key));
         peer1.trusted = true;
-        peers.insert(addr1, peer1);
-        peers.insert(addr2, Peer::new(None));
+        peer_registry.create_peer(&addr1, peer1);
+        peer_registry.create_peer(&addr2, Peer::new(None));
     }
-    save_peers(dir.path(), &peer_map);
+    save_peers(dir.path(), &peer_registry);
     let loaded = load_peers(dir.path());
 
     assert_eq!(loaded.len(), 2);
@@ -187,12 +178,12 @@ fn end_to_end_kk() {
     let initiator = TestNode::new();
     let responder = TestNode::new();
 
-    responder.peer_map.lock().unwrap().insert(
-        initiator.addr(),
+    responder.peer_map.create_peer(
+        &initiator.addr(),
         Peer::new(Some(initiator.public_key().try_into().unwrap())),
     );
-    initiator.peer_map.lock().unwrap().insert(
-        responder.addr(),
+    initiator.peer_map.create_peer(
+        &responder.addr(),
         Peer::new(Some(responder.public_key().try_into().unwrap())),
     );
 
@@ -203,35 +194,25 @@ fn end_to_end_kk() {
         &responder.addr(),
         &initiator.keypair,
         &initiator.socket,
-        Arc::clone(&initiator.peer_map),
+        initiator.peer_map.clone(),
     );
 
     assert!(result.is_ok());
 
-    {
-        let peers = initiator.peer_map.lock().unwrap();
+    initiator.peer_map.with_peers(|peers: &HashMap<SocketAddr, Peer>| {
         let peer = peers
             .get(&responder.addr())
             .expect("Peer must be in initiator's map");
-
         assert!(peer.trusted);
-    }
+    });
 
     thread::sleep(Duration::from_millis(200));
-    {
-        let peers = responder.peer_map.lock().unwrap();
-        assert!(peers.contains_key(&initiator.addr()));
-    }
-    responder
-        .peer_map
-        .lock()
-        .unwrap()
-        .get_mut(&initiator.addr())
-        .unwrap()
-        .trusted = true;
+    assert!(responder.peer_map.contains_key(&initiator.addr()));
+
+    responder.peer_map.set_trusted(&initiator.addr(), true);
 
     send_message(
-        &initiator.peer_map,
+        initiator.peer_map.clone(),
         &responder.addr(),
         "Integration test message",
         &initiator.socket,
@@ -260,13 +241,12 @@ fn end_to_end_xx() {
         &responder.addr(),
         &initiator.keypair,
         &initiator.socket,
-        Arc::clone(&initiator.peer_map),
+        initiator.peer_map.clone(),
     );
     assert!(result.is_ok());
 
     thread::sleep(Duration::from_millis(300));
-    {
-        let peers = initiator.peer_map.lock().unwrap();
+    initiator.peer_map.with_peers(|peers: &HashMap<SocketAddr, Peer>| {
         let peer = peers
             .get(&responder.addr())
             .expect("Peer must be in initiator's map");
@@ -275,10 +255,9 @@ fn end_to_end_xx() {
             peer.public_key.as_ref().map(|k| k.as_slice()),
             Some(responder.public_key().as_slice())
         );
-    }
+    });
 
-    {
-        let peers = responder.peer_map.lock().unwrap();
+    responder.peer_map.with_peers(|peers: &HashMap<SocketAddr, Peer>| {
         let peer = peers
             .get(&initiator.addr())
             .expect("Responder must have a peer entry for the initiator");
@@ -287,17 +266,12 @@ fn end_to_end_xx() {
             peer.public_key.as_ref().map(|k| k.as_slice()),
             Some(initiator.public_key().as_slice())
         );
-    }
-    responder
-        .peer_map
-        .lock()
-        .unwrap()
-        .get_mut(&initiator.addr())
-        .unwrap()
-        .trusted = true;
+    });
+
+    responder.peer_map.set_trusted(&initiator.addr(), true);
 
     send_message(
-        &initiator.peer_map,
+        initiator.peer_map.clone(),
         &responder.addr(),
         "XX handshake message",
         &initiator.socket,
@@ -319,24 +293,23 @@ fn end_to_end_save_reload_and_reconnect() {
     let responder = TestNode::new();
     let dir = tempdir().unwrap();
 
-    initiator.peer_map.lock().unwrap().insert(
-        responder.addr(),
+    initiator.peer_map.create_peer(
+        &responder.addr(),
         Peer::new(Some(responder.public_key().try_into().unwrap())),
     );
-    responder.peer_map.lock().unwrap().insert(
-        initiator.addr(),
+    responder.peer_map.create_peer(
+        &initiator.addr(),
         Peer::new(Some(initiator.public_key().try_into().unwrap())),
     );
 
     save_peers(dir.path(), &initiator.peer_map);
     let loaded = load_peers(dir.path());
-    {
-        let mut peers = initiator.peer_map.lock().unwrap();
+    initiator.peer_map.with_peers_mut(|peers: &mut HashMap<SocketAddr, Peer>| {
         peers.clear();
         for (addr, peer) in loaded {
             peers.insert(addr, peer);
         }
-    }
+    });
 
     responder.spawn_listener();
     initiator.spawn_listener();
@@ -346,33 +319,25 @@ fn end_to_end_save_reload_and_reconnect() {
             &responder.addr(),
             &initiator.keypair,
             &initiator.socket,
-            Arc::clone(&initiator.peer_map),
+            initiator.peer_map.clone(),
         )
         .is_ok()
     );
 
     thread::sleep(Duration::from_millis(200));
 
-    {
-        let peers = initiator.peer_map.lock().unwrap();
+    initiator.peer_map.with_peers(|peers: &HashMap<SocketAddr, Peer>| {
         let peer = peers
             .get(&responder.addr())
             .expect("Peer must be in initiator's map after reconnect");
         assert!(peer.trusted);
         assert!(peer.public_key.is_some());
-    }
+    });
 
-    {
-        let mut peers = responder.peer_map.lock().unwrap();
-        let peer = peers
-            .get_mut(&initiator.addr())
-            .expect("Responder must have a peer entry for the initiator after reconnect");
-        assert!(peer.public_key.is_some());
-        peer.trusted = true;
-    }
+    responder.peer_map.set_trusted(&initiator.addr(), true);
 
     send_message(
-        &initiator.peer_map,
+        initiator.peer_map.clone(),
         &responder.addr(),
         "After reload",
         &initiator.socket,
@@ -393,33 +358,33 @@ fn reject_from_unknown_peer() {
     let flagged = vec![SessionFlag::Reject as u8];
     node.handle_packet(&flagged, src);
 
-    assert!(!node.peer_map.lock().unwrap().contains_key(&src));
+    assert!(!node.peer_map.contains_key(&src));
 }
+
 #[test]
 fn end_to_end_save_reload_and_reconnect_deletion_of_contacts() {
     let initiator = TestNode::new();
     let responder = TestNode::new();
     let dir = tempdir().unwrap();
 
-    initiator.peer_map.lock().unwrap().insert(
-        responder.addr(),
+    initiator.peer_map.create_peer(
+        &responder.addr(),
         Peer::new(Some(responder.public_key().try_into().unwrap())),
     );
-    responder.peer_map.lock().unwrap().insert(
-        initiator.addr(),
+    responder.peer_map.create_peer(
+        &initiator.addr(),
         Peer::new(Some(initiator.public_key().try_into().unwrap())),
     );
 
     save_peers(dir.path(), &initiator.peer_map);
     delete_contacts(dir.path());
     let loaded = load_peers(dir.path());
-    {
-        let mut peers = initiator.peer_map.lock().unwrap();
+    initiator.peer_map.with_peers_mut(|peers: &mut HashMap<SocketAddr, Peer>| {
         peers.clear();
         for (addr, peer) in loaded {
             peers.insert(addr, peer);
         }
-    }
+    });
 
     responder.spawn_listener();
     initiator.spawn_listener();
@@ -429,23 +394,17 @@ fn end_to_end_save_reload_and_reconnect_deletion_of_contacts() {
             &responder.addr(),
             &initiator.keypair,
             &initiator.socket,
-            Arc::clone(&initiator.peer_map),
+            initiator.peer_map.clone(),
         )
         .is_ok()
     );
 
     thread::sleep(Duration::from_millis(200));
 
-    {
-        let mut peers = responder.peer_map.lock().unwrap();
-        let peer = peers
-            .get_mut(&initiator.addr())
-            .expect("Responder must have a peer entry for the initiator after reconnect");
-        assert!(peer.public_key.is_some());
-        peer.trusted = true;
-    }
+    responder.peer_map.set_trusted(&initiator.addr(), true);
+
     send_message(
-        &initiator.peer_map,
+        initiator.peer_map.clone(),
         &responder.addr(),
         "After reload",
         &initiator.socket,

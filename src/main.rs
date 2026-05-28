@@ -12,15 +12,13 @@ use std::{
 
 use cli_p2p_messenger::{
     crypto::generate_or_load_keypair, network::*, packet::Packet, session::Peer,
+    session::PeerRegistry,
 };
 
-fn set_destination(peer_map: &Arc<Mutex<HashMap<SocketAddr, Peer>>>) -> Option<SocketAddr> {
-    let contacts: Vec<SocketAddr> = peer_map
-        .lock()
-        .expect("poisoned mutex")
-        .keys()
-        .cloned()
-        .collect();
+fn set_destination(peers: &PeerRegistry) -> Option<SocketAddr> {
+    let contacts: Vec<SocketAddr> = peers.with_peers(|peers| {
+        peers.keys().cloned().collect()
+    });
     let mut input = String::new();
     if !contacts.is_empty() {
         println!(
@@ -89,8 +87,8 @@ fn client(socket: UdpSocket) {
         let key_pair_clone = Arc::clone(&key_pair);
 
         let loaded_peers: HashMap<SocketAddr, Peer> = load_peers(Path::new(&path));
-        let peer_map = Arc::new(Mutex::new(loaded_peers));
-        let peer_map_clone = Arc::clone(&peer_map);
+        let peers = PeerRegistry::new(loaded_peers);
+        let peers_clone = peers.clone();
         thread::spawn(move || {
             let mut recv_buffer = [0_u8; 65535];
             loop {
@@ -104,7 +102,7 @@ fn client(socket: UdpSocket) {
                     src,
                     &socket_clone,
                     &key_pair_clone,
-                    &peer_map_clone,
+                    peers_clone.clone(),
                     &writer,
                 );
             }
@@ -113,16 +111,11 @@ fn client(socket: UdpSocket) {
             stdin().read_line(&mut input).expect("Failed to read line");
 
             match input.trim().to_lowercase().as_ref() {
-                "connect" => match set_destination(&peer_map) {
+                "connect" => match set_destination(&peers) {
                     Some(new_destination) => {
                         destination = new_destination;
-                        let was_known = peer_map
-                            .lock()
-                            .unwrap()
-                            .get(&destination)
-                            .map(|p| p.has_static_key())
-                            .unwrap_or(false);
-                        match connect(&destination, &key_pair, &socket, peer_map.clone()) {
+                        let was_known = peers.is_known(&destination);
+                        match connect(&destination, &key_pair, &socket, peers.clone()) {
                             Ok(_) => {
                                 if !was_known {
                                     println!("Waiting for handshake to complete...");
@@ -130,27 +123,17 @@ fn client(socket: UdpSocket) {
                                     loop {
                                         thread::sleep(std::time::Duration::from_millis(100));
                                         attempts += 1;
-                                        let has_key = peer_map
-                                            .lock()
-                                            .unwrap()
-                                            .get(&destination)
-                                            .map(|p| p.has_static_key())
-                                            .unwrap_or(false);
+                                        let has_key = peers.is_known(&destination);
                                         if has_key || attempts > 50 {
                                             break;
                                         }
                                     }
 
-                                    let fingerprint = peer_map
-                                        .lock()
-                                        .unwrap()
-                                        .get(&destination)
-                                        .map(|peer| peer.fingerprint())
-                                        .unwrap_or_else(|| "<unknown>".to_string());
+                                    let fingerprint = peers.get_fingerprint(&destination);
 
                                     if fingerprint == "<unknown>" {
                                         println!("Handshake timed out.");
-                                        peer_map.lock().unwrap().remove(&destination);
+                                        peers.remove(&destination);
                                     } else {
                                         println!(
                                             "Do you want to connect to Peer with Fingerprint: {}\n\
@@ -161,28 +144,18 @@ fn client(socket: UdpSocket) {
                                         input.clear();
                                         stdin().read_line(&mut input).expect("Failed to read line");
                                         if input.trim().to_lowercase() == "y" {
-                                            peer_map
-                                                .lock()
-                                                .unwrap()
-                                                .get_mut(&destination)
-                                                .unwrap()
-                                                .trusted = true;
+                                            peers.set_trusted(&destination, true);
                                             println!("Peer approved and saved to contacts.");
                                         } else {
                                             send_reject(&socket, &destination);
-                                            peer_map.lock().unwrap().remove(&destination);
+                                            peers.remove(&destination);
                                             println!("Connection terminated.");
                                         }
                                     }
                                 } else {
                                     println!(
                                         "Connected to known peer (fingerprint: {})",
-                                        peer_map
-                                            .lock()
-                                            .unwrap()
-                                            .get(&destination)
-                                            .map(|p| p.fingerprint())
-                                            .unwrap_or_else(|| "<unknown>".to_string())
+                                        peers.get_fingerprint(&destination)
                                     );
                                 }
                             }
@@ -206,15 +179,13 @@ fn client(socket: UdpSocket) {
                     input.clear();
                 }
                 "contacts" => {
-                    peer_map
-                        .lock()
-                        .unwrap()
-                        .iter()
-                        .for_each(|addr| println!("{}", addr.0));
+                    peers.with_peers(|peers_map| {
+                        peers_map.iter().for_each(|addr| println!("{}", addr.0));
+                    });
                 }
                 "save" => {
                     save_message(Path::new(&path), &packages);
-                    save_peers(Path::new(&path), &peer_map);
+                    save_peers(Path::new(&path), &peers);
                 }
                 "fingerprint" => {
                     let public_key_bytes = &key_pair.lock().expect("poisoned mutex").public;
@@ -224,19 +195,19 @@ fn client(socket: UdpSocket) {
                     println!("{}", hex::encode(actual_digest.as_ref()));
                 }
                 "approve" => {
-                    let mut peer_map = peer_map.lock().expect("poisoned mutex");
-
-                    let untrusted: Vec<SocketAddr> = peer_map
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(i, (addr, peer))| {
-                            if !peer.trusted {
-                                println!("[{}] {} fingerprint {}", i + 1, addr, peer.fingerprint());
-                                return Some(*addr);
-                            }
-                            None
-                        })
-                        .collect();
+                    let untrusted: Vec<SocketAddr> = peers.with_peers(|peers_map| {
+                        peers_map
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(i, (addr, peer))| {
+                                if !peer.trusted {
+                                    println!("[{}] {} fingerprint {}", i + 1, addr, peer.fingerprint());
+                                    return Some(*addr);
+                                }
+                                None
+                            })
+                            .collect()
+                    });
                     if untrusted.is_empty() {
                         println!("No pending approvals");
                         continue;
@@ -247,10 +218,9 @@ fn client(socket: UdpSocket) {
                     if let Ok(number) = input.trim().parse::<usize>() {
                         if number > 0 && number <= untrusted.len() {
                             let target_addr = untrusted[number - 1];
-                            if let Some(peer) = peer_map.get_mut(&target_addr) {
-                                peer.trusted = true;
-                                println!("approved {}", peer.fingerprint());
-                            }
+                            peers.set_trusted(&target_addr, true);
+                            let fingerprint = peers.get_fingerprint(&target_addr);
+                            println!("approved {}", fingerprint);
                         } else {
                             println!("Invalid selection");
                         }
@@ -259,23 +229,11 @@ fn client(socket: UdpSocket) {
                     };
                 }
                 "clear" => {
+                    peers.clear();
                     delete_contacts(Path::new(&path));
-                    peer_map.lock().unwrap().clear();
                 }
                 "disconnect" => {
-                    let mut peer_map = peer_map.lock().expect("poisoned mutex");
-
-                    let trusted: Vec<SocketAddr> = peer_map
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(i, (addr, peer))| {
-                            if peer.trusted {
-                                println!("[{}] {} ", i + 1, addr);
-                                return Some(*addr);
-                            }
-                            None
-                        })
-                        .collect();
+                    let trusted: Vec<SocketAddr> = peers.get_trusted_peers();
                     if trusted.is_empty() {
                         println!("No one to disconnect from");
                         continue;
@@ -287,7 +245,7 @@ fn client(socket: UdpSocket) {
                         if number > 0 && number <= trusted.len() {
                             let target_addr = trusted[number - 1];
                             send_reject(&socket, &target_addr);
-                            peer_map.remove(&target_addr);
+                            peers.remove(&target_addr);
                             println!("disconnected");
                         } else {
                             println!("Invalid selection");
@@ -312,7 +270,7 @@ disconnect: disconnects from a peer.
                     );
                 }
 
-                _ => send_message(&peer_map, &destination, &input, &socket),
+                _ => send_message(peers.clone(), &destination, &input, &socket),
             };
             input.clear();
         }
