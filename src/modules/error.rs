@@ -11,6 +11,9 @@ pub enum SessionError {
 
     #[error("Encryption failed: {0}")]
     Encryption(#[from] snow::Error),
+
+    #[error("Network I/O failed: {0}")]
+    Io(#[from] io::Error),
 }
 
 #[derive(Error, Debug)]

@@ -14,6 +14,7 @@ use std::{
     thread,
     time::Duration,
 };
+use cli_p2p_messenger::error::SessionError;
 use tempfile::tempdir;
 
 fn create_keypair() -> snow::Keypair {
@@ -47,7 +48,7 @@ impl TestNode {
     }
 
     fn handle_packet(&self, data: &[u8], src: SocketAddr) {
-        handle_incoming_packets(
+        let _ = handle_incoming_packets(
             data,
             data.len(),
             src,
@@ -68,7 +69,7 @@ impl TestNode {
                 let mut buf = [0u8; 65535];
                 match sock.recv_from(&mut buf) {
                     Ok((bytes, src)) => {
-                        handle_incoming_packets(&buf, bytes, src, &sock, &kp, pm.clone(), &pk);
+                        let _ = handle_incoming_packets(&buf, bytes, src, &sock, &kp, pm.clone(), &pk);
                     }
                     Err(_) => break,
                 }
@@ -109,7 +110,7 @@ fn transport_message_stored_only_for_trusted_peer() {
         &responder.addr(),
         "Untrusted message",
         &initiator.socket,
-    );
+    ).unwrap();
     thread::sleep(Duration::from_millis(150));
     assert!(responder.packets.lock().unwrap().is_empty());
 
@@ -120,7 +121,7 @@ fn transport_message_stored_only_for_trusted_peer() {
         &responder.addr(),
         "Trusted message",
         &initiator.socket,
-    );
+    ).unwrap();
     thread::sleep(Duration::from_millis(150));
 
     let stored = responder.packets.lock().unwrap();
@@ -138,7 +139,8 @@ fn send_message_without_peer() {
         .unwrap();
     let dest = receiver_socket.local_addr().unwrap();
 
-    send_message(node.peer_map.clone(), &dest, "Should not arrive", &node.socket);
+    let err = send_message(node.peer_map.clone(), &dest, "Should not arrive", &node.socket).unwrap_err();
+    assert!(matches!(err, SessionError::PeerNotFound));
     let mut recv_buf = [0u8; 65535];
     assert!(receiver_socket.recv_from(&mut recv_buf).is_err());
 }
@@ -157,7 +159,7 @@ fn save_and_load_peers() {
         peer_registry.create_peer(&addr1, peer1);
         peer_registry.create_peer(&addr2, Peer::new(None));
     }
-    save_peers(dir.path(), &peer_registry);
+    save_peers(dir.path(), &peer_registry).unwrap();
     let loaded = load_peers(dir.path());
 
     assert_eq!(loaded.len(), 2);
@@ -216,7 +218,7 @@ fn end_to_end_kk() {
         &responder.addr(),
         "Integration test message",
         &initiator.socket,
-    );
+    ).unwrap();
 
     thread::sleep(Duration::from_millis(200));
 
@@ -275,7 +277,7 @@ fn end_to_end_xx() {
         &responder.addr(),
         "XX handshake message",
         &initiator.socket,
-    );
+    ).unwrap();
 
     thread::sleep(Duration::from_millis(200));
 
@@ -302,7 +304,7 @@ fn end_to_end_save_reload_and_reconnect() {
         Peer::new(Some(initiator.public_key().try_into().unwrap())),
     );
 
-    save_peers(dir.path(), &initiator.peer_map);
+    save_peers(dir.path(), &initiator.peer_map).unwrap();
     let loaded = load_peers(dir.path());
     initiator.peer_map.with_peers_mut(|peers: &mut HashMap<SocketAddr, Peer>| {
         peers.clear();
@@ -341,7 +343,7 @@ fn end_to_end_save_reload_and_reconnect() {
         &responder.addr(),
         "After reload",
         &initiator.socket,
-    );
+    ).unwrap();
     thread::sleep(Duration::from_millis(200));
     let stored = responder.packets.lock().unwrap();
     assert!(!stored.is_empty());
@@ -376,8 +378,8 @@ fn end_to_end_save_reload_and_reconnect_deletion_of_contacts() {
         Peer::new(Some(initiator.public_key().try_into().unwrap())),
     );
 
-    save_peers(dir.path(), &initiator.peer_map);
-    delete_contacts(dir.path());
+    save_peers(dir.path(), &initiator.peer_map).unwrap();
+    delete_contacts(dir.path()).unwrap();
     let loaded = load_peers(dir.path());
     initiator.peer_map.with_peers_mut(|peers: &mut HashMap<SocketAddr, Peer>| {
         peers.clear();
@@ -408,7 +410,7 @@ fn end_to_end_save_reload_and_reconnect_deletion_of_contacts() {
         &responder.addr(),
         "After reload",
         &initiator.socket,
-    );
+    ).unwrap();
     thread::sleep(Duration::from_millis(200));
     let stored = responder.packets.lock().unwrap();
     assert!(!stored.is_empty());

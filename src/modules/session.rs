@@ -7,6 +7,8 @@ use std::{
 use ring::digest;
 use serde::{Deserialize, Serialize};
 
+use super::error::SessionError;
+
 #[derive(Default)]
 pub enum Session {
     #[default]
@@ -175,19 +177,17 @@ impl PeerRegistry {
         addr: &SocketAddr,
         plaintext: &[u8],
         ciphertext: &mut [u8],
-    ) -> Result<usize, String> {
+    ) -> Result<usize, SessionError> {
         let mut peers = self.peers.lock().unwrap();
 
-        if let Some(peer) = peers.get_mut(addr) {
-            if let Session::Established(transport) = &mut peer.session {
-                transport
-                    .write_message(plaintext, ciphertext)
-                    .map_err(|e| format!("Encryption error: {}", e))
-            } else {
-                Err("Session not established".to_string())
-            }
+        let peer = peers.get_mut(addr).ok_or(SessionError::PeerNotFound)?;
+
+        if let Session::Established(transport) = &mut peer.session {
+            transport
+                .write_message(plaintext, ciphertext)
+                .map_err(SessionError::Encryption)
         } else {
-            Err("Peer not found".to_string())
+            Err(SessionError::SessionNotEstablished)
         }
     }
 }

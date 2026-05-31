@@ -94,7 +94,7 @@ fn client(socket: UdpSocket) {
                     .recv_from(&mut recv_buffer)
                     .expect("error in thread");
 
-                handle_incoming_packets(
+                if let Err(e) = handle_incoming_packets(
                     &recv_buffer,
                     bytes,
                     src,
@@ -102,7 +102,9 @@ fn client(socket: UdpSocket) {
                     &key_pair_clone,
                     peers_clone.clone(),
                     &writer,
-                );
+                ) {
+                    eprintln!("Error handling packet from {}: {}", src, e);
+                }
             }
         });
         loop {
@@ -167,9 +169,7 @@ fn client(socket: UdpSocket) {
                 "messages" => {
                     let reader_data = Arc::clone(&packages);
                     for messages in reader_data.lock().expect("mutex poisoned").iter() {
-                        if let Err(e) = messages.print_message() {
-                            println!("{}", e);
-                        }
+                        messages.print_message();
                     }
                 }
                 "ip" => {
@@ -182,8 +182,12 @@ fn client(socket: UdpSocket) {
                     });
                 }
                 "save" => {
-                    save_message(Path::new(&path), &packages);
-                    save_peers(Path::new(&path), &peers);
+                    if let Err(e) = save_message(Path::new(&path), &packages) {
+                        println!("Failed to save messages: {}", e);
+                    }
+                    if let Err(e) = save_peers(Path::new(&path), &peers) {
+                        println!("Failed to save peers: {}", e);
+                    }
                 }
                 "fingerprint" => {
                     let public_key_bytes = &key_pair.lock().expect("poisoned mutex").public;
@@ -233,7 +237,9 @@ fn client(socket: UdpSocket) {
                 }
                 "clear" => {
                     peers.clear();
-                    delete_contacts(Path::new(&path));
+                    if let Err(e) = delete_contacts(Path::new(&path)) {
+                        println!("Failed to delete contacts: {}", e);
+                    }
                 }
                 "disconnect" => {
                     let trusted: Vec<SocketAddr> = peers.get_trusted_peers();
@@ -264,8 +270,12 @@ fn client(socket: UdpSocket) {
                         .map(|addr| send_reject(&socket, addr))
                         .count();
                     println!("disconnected from {}", count);
-                    save_message(Path::new(&path), &packages);
-                    save_peers(Path::new(&path), &peers);
+                    if let Err(e) = save_message(Path::new(&path), &packages) {
+                        println!("Failed to save messages: {}", e);
+                    }
+                    if let Err(e) = save_peers(Path::new(&path), &peers) {
+                        println!("Failed to save peers: {}", e);
+                    }
                     break;
                 }
                 "help" => {
@@ -285,7 +295,11 @@ exit: disconnects from all peers and saves the contacts before exiting.
                     );
                 }
 
-                _ => send_message(peers.clone(), &destination, &input, &socket),
+                _ => {
+                    if let Err(e) = send_message(peers.clone(), &destination, &input, &socket) {
+                        println!("Failed to send message: {}", e);
+                    }
+                }
             };
             input.clear();
         }
